@@ -74,7 +74,6 @@ const saveState = (key, value) => {
 const initials = (name) =>
   (name || '?').split(' ').map((n) => n[0]).slice(0, 2).join('').toUpperCase();
 
-/* ✅ FIX: simplified — same branch was used twice */
 const formatDate = (val) => {
   if (!val) return '—';
   const d = new Date(val);
@@ -102,7 +101,7 @@ export default function Agents() {
   const [showAddAgent, setShowAddAgent] = useState(false);
   const [viewingAgent, setViewingAgent] = useState(null);
 
-  /* ✅ FIX: edit modal lives at parent level so the drawer can trigger it */
+  /* edit modal lives at parent level so the drawer can trigger it */
   const [editingAgent, setEditingAgent] = useState(null);
 
   const [allAgents, setAllAgents] = useState(() =>
@@ -155,7 +154,6 @@ export default function Agents() {
     setShowAddAgent(false);
   };
 
-  /* ✅ FIX: accepts id + updates, closes any edit state */
   const handleEdit = (id, updates) => {
     setAllAgents((p) => p.map((a) => (a.id === id ? { ...a, ...updates } : a)));
     setEditingAgent(null);
@@ -176,7 +174,6 @@ export default function Agents() {
     if (!confirmDelete) return;
     if (confirmDelete.kind === 'agent') {
       setAllAgents((p) => p.filter((a) => a.id !== confirmDelete.id));
-      /* ✅ FIX: also clean up activity log entries for deleted agent */
       setActivityLog((p) => p.filter((log) => log.agentId !== confirmDelete.id));
       showToast(`"${confirmDelete.name}" removed`, 'error');
     } else if (confirmDelete.kind === 'group') {
@@ -196,7 +193,6 @@ export default function Agents() {
         `Status changed to ${newStatus}`
       );
     }
-    /* ✅ FIX: sync viewing agent state too */
     setViewingAgent((prev) => (prev && prev.id === id ? { ...prev, status: newStatus } : prev));
     showToast(`${agent?.name} → ${newStatus}`);
   };
@@ -437,7 +433,6 @@ export default function Agents() {
           />
         )}
 
-        {/* ✅ FIX: single edit modal driven by parent state */}
         {editingAgent && (
           <AgentModal
             mode="edit"
@@ -447,7 +442,6 @@ export default function Agents() {
           />
         )}
 
-        {/* ✅ FIXED: onEdit now uses parent's setEditingAgent — no more undefined reference */}
         {viewingAgent && (
           <AgentDetailDrawer
             agent={viewingAgent}
@@ -569,7 +563,6 @@ function AgentsListTab({ agents, websiteLeads, onAdd, onEdit, onDelete, onSetSta
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('All');
   const [statusOpen, setStatusOpen] = useState(false);
-  const [menuOpenId, setMenuOpenId] = useState(null);
   const [viewMode, setViewMode] = useState('grid');
   const [showModal, setShowModal] = useState(false);
   const [editingAgent, setEditingAgent] = useState(null);
@@ -673,12 +666,9 @@ function AgentsListTab({ agents, websiteLeads, onAdd, onEdit, onDelete, onSetSta
               key={agent.id}
               agent={agent}
               websiteLeads={websiteLeads}
-              menuOpenId={menuOpenId}
-              setMenuOpenId={setMenuOpenId}
               onView={() => onView(agent)}
-              onEdit={() => { setEditingAgent(agent); setShowModal(true); setMenuOpenId(null); }}
-              onDelete={() => { onDelete(agent.id, agent.name); setMenuOpenId(null); }}
-              onSetStatus={(s) => { onSetStatus(agent.id, s); setMenuOpenId(null); }}
+              onEdit={() => { setEditingAgent(agent); setShowModal(true); }}
+              onDelete={() => onDelete(agent.id, agent.name)}
               onViewLeads={() => onViewLeads(agent.name)}
               groups={groups}
             />
@@ -692,12 +682,9 @@ function AgentsListTab({ agents, websiteLeads, onAdd, onEdit, onDelete, onSetSta
                 key={agent.id}
                 agent={agent}
                 websiteLeads={websiteLeads}
-                menuOpenId={menuOpenId}
-                setMenuOpenId={setMenuOpenId}
                 onView={() => onView(agent)}
-                onEdit={() => { setEditingAgent(agent); setShowModal(true); setMenuOpenId(null); }}
-                onDelete={() => { onDelete(agent.id, agent.name); setMenuOpenId(null); }}
-                onSetStatus={(s) => { onSetStatus(agent.id, s); setMenuOpenId(null); }}
+                onEdit={() => { setEditingAgent(agent); setShowModal(true); }}
+                onDelete={() => onDelete(agent.id, agent.name)}
                 onViewLeads={() => onViewLeads(agent.name)}
               />
             ))}
@@ -718,7 +705,7 @@ function AgentsListTab({ agents, websiteLeads, onAdd, onEdit, onDelete, onSetSta
 }
 
 /* ═══ AGENT CARD (GRID) ═══ */
-function AgentCard({ agent, websiteLeads, menuOpenId, setMenuOpenId, onView, onEdit, onDelete, onSetStatus, onViewLeads, groups }) {
+function AgentCard({ agent, websiteLeads, onView, onEdit, onDelete, onViewLeads, groups }) {
   const stats = useMemo(() => {
     const agentLeads = websiteLeads.filter((l) => l.assignedAgent === agent.name);
     const won = agentLeads.filter((l) => l.status === 'Won').length;
@@ -759,26 +746,6 @@ function AgentCard({ agent, websiteLeads, menuOpenId, setMenuOpenId, onView, onE
             {agent.status}
           </span>
         </span>
-
-        <div className="relative shrink-0">
-          <button
-            onClick={() => setMenuOpenId(menuOpenId === agent.id ? null : agent.id)}
-            className="rounded-lg p-1.5 text-brand-ink/40 hover:bg-brand-lilac"
-            title="Change status"
-          >
-            <MoreVertical size={14} />
-          </button>
-          {menuOpenId === agent.id && (
-            <>
-              <div className="fixed inset-0 z-10" onClick={() => setMenuOpenId(null)} />
-              <div className="absolute right-0 top-full z-20 mt-2 w-48 rounded-xl border border-brand-lilac bg-white p-1 shadow-panel">
-                <MenuItem icon={CheckCircle2}  label="Set Active"  onClick={() => onSetStatus('Active')} />
-                <MenuItem icon={Pause}         label="Set Break"   onClick={() => onSetStatus('Break')} />
-                <MenuItem icon={LogOut}        label="Set Offline" onClick={() => onSetStatus('Offline')} />
-              </div>
-            </>
-          )}
-        </div>
       </div>
 
       {agentGroups.length > 0 && (
@@ -841,7 +808,7 @@ function AgentCard({ agent, websiteLeads, menuOpenId, setMenuOpenId, onView, onE
 }
 
 /* ═══ AGENT ROW (LIST) ═══ */
-function AgentRow({ agent, websiteLeads, menuOpenId, setMenuOpenId, onView, onEdit, onDelete, onSetStatus }) {
+function AgentRow({ agent, websiteLeads, onView, onEdit, onDelete }) {
   const stats = useMemo(() => {
     const agentLeads = websiteLeads.filter((l) => l.assignedAgent === agent.name);
     const won = agentLeads.filter((l) => l.status === 'Won').length;
@@ -912,25 +879,6 @@ function AgentRow({ agent, websiteLeads, menuOpenId, setMenuOpenId, onView, onEd
         >
           <Trash2 size={12} /> Remove
         </button>
-        <div className="relative">
-          <button
-            onClick={() => setMenuOpenId(menuOpenId === agent.id ? null : agent.id)}
-            className="flex h-8 w-8 items-center justify-center rounded-lg text-brand-ink/40 hover:bg-brand-lilac"
-            title="Change status"
-          >
-            <MoreVertical size={14} />
-          </button>
-          {menuOpenId === agent.id && (
-            <>
-              <div className="fixed inset-0 z-10" onClick={() => setMenuOpenId(null)} />
-              <div className="absolute right-0 top-full z-20 mt-2 w-48 rounded-xl border border-brand-lilac bg-white p-1 shadow-panel">
-                <MenuItem icon={CheckCircle2} label="Set Active"  onClick={() => onSetStatus('Active')} />
-                <MenuItem icon={Pause}        label="Set Break"   onClick={() => onSetStatus('Break')} />
-                <MenuItem icon={LogOut}       label="Set Offline" onClick={() => onSetStatus('Offline')} />
-              </div>
-            </>
-          )}
-        </div>
       </div>
     </li>
   );
@@ -1742,7 +1690,6 @@ function ActivityTab({ activityLog, agents, onClear }) {
 /* ═══════════════════════════════════════════════════════════════
    TAB 5 — PERFORMANCE
    ═══════════════════════════════════════════════════════════════ */
-/* ✅ FIX: removed unused `websiteId` prop */
 function PerformanceTab({ agents, websiteLeads, onView }) {
   const [sortBy, setSortBy] = useState('conversion');
 
