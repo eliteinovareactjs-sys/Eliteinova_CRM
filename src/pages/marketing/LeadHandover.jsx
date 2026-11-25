@@ -3,9 +3,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Plus, Search, Filter, ChevronDown, Eye, Pencil,
   Trash2, AlertCircle, CheckCircle2, XCircle, X, Users,
-  Sparkles, Clock, Zap, Target, Calendar, Globe, MapPin,
+  Sparkles, Clock, Target, Calendar, Globe, MapPin, Mail, Phone,
   Briefcase, Flame, Inbox, Download, Grid3x3, List,
-  Activity, Star, Megaphone, Send, FileWarning, UserCheck,
+  Activity, Megaphone, Send, FileWarning, UserCheck,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 
@@ -25,6 +25,17 @@ const HANDOVER_STATUSES = [
   'Accepted', 'Rejected', 'Duplicate', 'Invalid',
 ];
 
+/* Statuses that only make sense once a manager is assigned */
+const ASSIGNED_STATUSES = ['Submitted', 'Accepted', 'Rejected'];
+
+const ACTION_LABELS = {
+  Submitted: 'Submitted to Manager',
+  Accepted: 'Accepted',
+  Rejected: 'Rejected',
+  Duplicate: 'Marked Duplicate',
+  Invalid: 'Marked Invalid',
+};
+
 const STATUS_STYLES = {
   'New':                { chip: 'bg-blue-100 text-blue-600 border-blue-200',           icon: Sparkles },
   'Under Review':       { chip: 'bg-violet-100 text-brand-purple border-violet-200',   icon: Eye },
@@ -36,6 +47,18 @@ const STATUS_STYLES = {
   'Invalid':            { chip: 'bg-slate-100 text-slate-600 border-slate-200',        icon: XCircle },
 };
 
+const PRIORITY_TEXT = {
+  High:   'text-brand-magenta',
+  Medium: 'text-amber-600',
+  Low:    'text-emerald-600',
+};
+
+const PRIORITY_CHIP = {
+  High:   'border-rose-200 bg-rose-50 text-brand-magenta',
+  Medium: 'border-amber-200 bg-amber-50 text-amber-600',
+  Low:    'border-emerald-200 bg-emerald-50 text-emerald-600',
+};
+
 const LEAD_SOURCES = [
   'Website', 'Landing Page', 'Google Ads', 'Meta Ads', 'Facebook',
   'Instagram', 'YouTube', 'WhatsApp', 'LinkedIn', 'Referral',
@@ -45,37 +68,35 @@ const LEAD_SOURCES = [
 const MANAGERS = ['Ravi Sharma', 'Anita Desai', 'Kiran Rao', 'Priya Menon'];
 
 const STORAGE_KEY = 'handover:marketing';
+const COUNTER_KEY = 'handover:marketing:counter';
+const COUNTER_BASE = 1034; // seeds end at L-1034
 
-const loadState = (fallback) => {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) return parsed;
-    }
-  } catch { /* ignore */ }
-  return fallback;
+/* ═══════════════════════════════════════════════════════════════
+   HELPERS
+   ═══════════════════════════════════════════════════════════════ */
+/* Local-timezone YYYY-MM-DD (fixes IST users seeing "yesterday") */
+const today = () => {
+  const d = new Date();
+  d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+  return d.toISOString().slice(0, 10);
 };
 
-const saveState = (value) => {
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(value)); } catch { /* ignore */ }
+/* Parse YYYY-MM-DD as LOCAL date (new Date('2024-06-01') is UTC and can show the previous day) */
+const parseLocal = (val) => {
+  if (!val) return null;
+  const d = /^\d{4}-\d{2}-\d{2}$/.test(val) ? new Date(`${val}T00:00:00`) : new Date(val);
+  return isNaN(d.getTime()) ? null : d;
 };
 
 const formatDate = (val) => {
-  if (!val) return '—';
-  const d = new Date(val);
-  if (isNaN(d.getTime())) return '—';
-  return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+  const d = parseLocal(val);
+  return d ? d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
 };
 
 const formatShortDate = (val) => {
-  if (!val) return '—';
-  const d = new Date(val);
-  if (isNaN(d.getTime())) return '—';
-  return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' });
+  const d = parseLocal(val);
+  return d ? d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) : '—';
 };
-
-const today = () => new Date().toISOString().slice(0, 10);
 
 const initialsOf = (name) =>
   (name || '')
@@ -85,6 +106,109 @@ const initialsOf = (name) =>
     .slice(0, 2)
     .join('')
     .toUpperCase() || '?';
+
+/* CSV formula-injection guard */
+const csvCell = (v) => {
+  let s = String(v ?? '');
+  if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
+  return `"${s.replace(/"/g, '""')}"`;
+};
+
+/* Reliable CSV download (Firefox/Safari safe, Excel-friendly UTF-8 BOM) */
+const downloadCsv = (rows, filename) => {
+  const csv = rows.map((r) => r.map(csvCell).join(',')).join('\n');
+  const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+};
+
+/* Fill defaults for legacy / partial records */
+const normalizeLead = (l) => ({
+  name: '', mobile: '', email: '', city: '', source: 'Website', campaign: '', project: '',
+  status: 'New', priority: 'Medium', handoverTo: '', notes: '',
+  submittedAt: null, acceptedAt: null, lastUpdateAt: today(),
+  ...l,
+  history: Array.isArray(l.history) ? l.history : [],
+});
+
+const loadState = (fallback) => {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed.map(normalizeLead);
+    }
+  } catch { /* ignore */ }
+  return fallback;
+};
+
+const saveState = (value) => {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(value)); } catch { /* ignore */ }
+};
+
+/* Monotonic lead ID — never reuses an ID, even after deleting the newest lead */
+const nextLeadId = (existing) => {
+  let max = COUNTER_BASE;
+  existing.forEach((l) => {
+    const n = parseInt(String(l.id).replace(/^L-/, ''), 10);
+    if (Number.isFinite(n) && n > max) max = n;
+  });
+  let stored = 0;
+  try { stored = Number(localStorage.getItem(COUNTER_KEY)) || 0; } catch { /* ignore */ }
+  const next = Math.max(max, stored) + 1;
+  try { localStorage.setItem(COUNTER_KEY, String(next)); } catch { /* ignore */ }
+  return `L-${next}`;
+};
+
+/* Single place that moves a lead to a new status and records history */
+const transition = (lead, newStatus, by, extra = {}) => {
+  const now = today();
+  const preSubmit = ['New', 'Under Review', 'Ready for Handover'];
+  return {
+    ...lead,
+    ...extra,
+    status: newStatus,
+    submittedAt: newStatus === 'Submitted'
+      ? now
+      : preSubmit.includes(newStatus) ? null : lead.submittedAt,
+    acceptedAt: newStatus === 'Accepted' ? now : null,
+    lastUpdateAt: now,
+    history: [
+      ...(lead.history || []),
+      { at: now, action: ACTION_LABELS[newStatus] || `Status → ${newStatus}`, by },
+    ],
+  };
+};
+
+/* One definition of what each tab shows (used by both list and counts) */
+const matchesTab = (l, key) => {
+  switch (key) {
+    case 'ready':    return ['Ready for Handover', 'Under Review', 'New'].includes(l.status);
+    case 'assigned': return Boolean(l.handoverTo) && ASSIGNED_STATUSES.includes(l.status);
+    case 'pending':  return l.status === 'Submitted';
+    case 'accepted': return l.status === 'Accepted';
+    case 'history':  return (l.history || []).length > 1;
+    default:         return true;
+  }
+};
+
+/* Escape-key hook (stable listener, always calls latest handler) */
+function useEscape(enabled, handler) {
+  const handlerRef = useRef(handler);
+  useEffect(() => { handlerRef.current = handler; });
+  useEffect(() => {
+    if (!enabled) return undefined;
+    const onKey = (e) => { if (e.key === 'Escape') handlerRef.current(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [enabled]);
+}
 
 /* ═══════════════════════════════════════════════════════════════
    SEED DATA
@@ -156,7 +280,8 @@ const SEED_LEADS = [
    MAIN COMPONENT
    ═══════════════════════════════════════════════════════════════ */
 export default function LeadHandover() {
-  const { user } = useAuth();
+  const { user } = useAuth() || {};
+  const actor = user?.name || 'Marketing Exec';
 
   const [leads, setLeads] = useState(() => loadState(SEED_LEADS));
   const [activeTab, setActiveTab] = useState('ready');
@@ -170,18 +295,19 @@ export default function LeadHandover() {
 
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState(null);
-  const [viewing, setViewing] = useState(null);
+  const [viewingId, setViewingId] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(null);
 
+  // Derived from live data so the drawer never shows stale info
+  const viewing = useMemo(
+    () => leads.find((l) => l.id === viewingId) || null,
+    [leads, viewingId]
+  );
+
   const toastTimerRef = useRef(null);
-  const editingIdRef = useRef(null);
-  const viewingIdRef = useRef(null);
 
   useEffect(() => { saveState(leads); }, [leads]);
-
-  useEffect(() => () => {
-    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
-  }, []);
+  useEffect(() => () => { if (toastTimerRef.current) clearTimeout(toastTimerRef.current); }, []);
 
   const showToast = useCallback((msg, type = 'success') => {
     setToast({ msg, type });
@@ -189,37 +315,9 @@ export default function LeadHandover() {
     toastTimerRef.current = setTimeout(() => setToast(null), 2400);
   }, []);
 
-  /* ── Keep editing/viewing in sync with latest leads state ── */
-  useEffect(() => {
-    if (editingIdRef.current) {
-      const fresh = leads.find((l) => l.id === editingIdRef.current);
-      if (fresh) {
-        setEditing((prev) => (prev && prev === fresh ? prev : fresh));
-      }
-    }
-    if (viewingIdRef.current) {
-      const fresh = leads.find((l) => l.id === viewingIdRef.current);
-      if (fresh) {
-        setViewing((prev) => (prev && prev === fresh ? prev : fresh));
-      }
-    }
-  }, [leads]);
-
-  /* ── TAB FILTERS ── */
+  /* ── TAB + FILTERS ── */
   const tabFiltered = useMemo(() => {
-    let list = [...leads];
-
-    if (activeTab === 'ready') {
-      list = list.filter((l) => ['Ready for Handover', 'Under Review', 'New'].includes(l.status));
-    } else if (activeTab === 'assigned') {
-      list = list.filter((l) => l.handoverTo && ['Submitted', 'Accepted', 'Rejected'].includes(l.status));
-    } else if (activeTab === 'pending') {
-      list = list.filter((l) => l.status === 'Submitted');
-    } else if (activeTab === 'accepted') {
-      list = list.filter((l) => l.status === 'Accepted');
-    } else if (activeTab === 'history') {
-      list = list.filter((l) => l.history && l.history.length > 1);
-    }
+    let list = leads.filter((l) => matchesTab(l, activeTab));
 
     if (statusFilter !== 'All') list = list.filter((l) => l.status === statusFilter);
     if (sourceFilter !== 'All') list = list.filter((l) => l.source === sourceFilter);
@@ -227,13 +325,13 @@ export default function LeadHandover() {
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
       list = list.filter((l) =>
-        `${l.name} ${l.id} ${l.mobile} ${l.email} ${l.source} ${l.campaign}`
+        `${l.name} ${l.id} ${l.mobile} ${l.email} ${l.city} ${l.source} ${l.campaign} ${l.project} ${l.handoverTo}`
           .toLowerCase()
           .includes(q)
       );
     }
 
-    return list.sort((a, b) => new Date(b.lastUpdateAt) - new Date(a.lastUpdateAt));
+    return [...list].sort((a, b) => (b.lastUpdateAt || '').localeCompare(a.lastUpdateAt || ''));
   }, [leads, activeTab, statusFilter, sourceFilter, searchQuery]);
 
   /* ── SUMMARY — computed from ALL leads ── */
@@ -245,187 +343,131 @@ export default function LeadHandover() {
     rejected: leads.filter((l) => l.status === 'Rejected').length,
   }), [leads]);
 
-  const tabCounts = useMemo(() => ({
-    ready:    leads.filter((l) => ['Ready for Handover', 'Under Review', 'New'].includes(l.status)).length,
-    assigned: leads.filter((l) => l.handoverTo && ['Submitted', 'Accepted', 'Rejected'].includes(l.status)).length,
-    pending:  leads.filter((l) => l.status === 'Submitted').length,
-    accepted: leads.filter((l) => l.status === 'Accepted').length,
-    history:  leads.filter((l) => l.history && l.history.length > 1).length,
-  }), [leads]);
-
-  /* ── ID GENERATION — monotonic, collision-safe ── */
-  const nextLeadId = useCallback((existing) => {
-    const maxNum = existing.reduce((m, l) => {
-      const n = parseInt(String(l.id).replace(/^L-/, ''), 10);
-      return Number.isFinite(n) && n > m ? n : m;
-    }, 1034);
-    return `L-${maxNum + 1}`;
-  }, []);
+  const tabCounts = useMemo(() => {
+    const map = {};
+    HANDOVER_TABS.forEach((t) => { map[t.key] = leads.filter((l) => matchesTab(l, t.key)).length; });
+    return map;
+  }, [leads]);
 
   /* ── HANDLERS ── */
-  const handleCreate = useCallback((data) => {
-    setLeads((prev) => {
-      const newLead = {
-        ...data,
-        id: nextLeadId(prev),
-        status: data.status || 'New',
-        submittedAt: null,
-        acceptedAt: null,
-        lastUpdateAt: today(),
-        history: [{ at: today(), action: 'Created', by: user?.name || 'Marketing Exec' }],
-      };
-      return [newLead, ...prev];
-    });
-    setShowModal(false);
-    setEditing(null);
-    editingIdRef.current = null;
-    showToast(`Lead "${data.name}" added`);
-  }, [nextLeadId, showToast, user]);
-
-  const handleEdit = useCallback((id, updates) => {
-    setLeads((prev) => prev.map((l) => (l.id === id ? { ...l, ...updates, lastUpdateAt: today() } : l)));
-    setEditing(null);
-    setShowModal(false);
-    editingIdRef.current = null;
-    showToast('Lead updated');
-  }, [showToast]);
-
-  const handleDelete = useCallback((id) => {
-    setLeads((prev) => prev.filter((l) => l.id !== id));
-    setConfirmDelete(null);
-    if (editingIdRef.current === id) { setEditing(null); editingIdRef.current = null; }
-    if (viewingIdRef.current === id) { setViewing(null); viewingIdRef.current = null; }
-    showToast('Lead deleted', 'error');
-  }, [showToast]);
-
-  const handleStatusChange = useCallback((id, newStatus) => {
-    setLeads((prev) =>
-      prev.map((l) => {
-        if (l.id !== id) return l;
-        const now = today();
-        const newHistory = [
-          ...(l.history || []),
-          { at: now, action: `Status → ${newStatus}`, by: user?.name || 'Marketing Exec' },
-        ];
-        return {
-          ...l,
-          status: newStatus,
-          submittedAt: newStatus === 'Submitted' ? now : l.submittedAt,
-          acceptedAt: newStatus === 'Accepted' ? now : l.acceptedAt,
-          lastUpdateAt: now,
-          history: newHistory,
-        };
-      })
-    );
-    showToast(`Status → ${newStatus}`);
-  }, [showToast, user]);
-
-  const handleSubmitToManager = useCallback((id, handoverTo) => {
-    setLeads((prev) =>
-      prev.map((l) => {
-        if (l.id !== id) return l;
-        const now = today();
-        return {
-          ...l,
-          status: 'Submitted',
-          handoverTo: handoverTo || l.handoverTo || MANAGERS[0],
-          submittedAt: now,
-          lastUpdateAt: now,
-          history: [...(l.history || []), { at: now, action: 'Submitted to Manager', by: user?.name || 'Marketing Exec' }],
-        };
-      })
-    );
-    showToast('Submitted to Manager');
-  }, [showToast, user]);
-
-  const handleAccept = useCallback((id) => {
-    setLeads((prev) =>
-      prev.map((l) => {
-        if (l.id !== id) return l;
-        const now = today();
-        return {
-          ...l,
-          status: 'Accepted',
-          acceptedAt: now,
-          lastUpdateAt: now,
-          history: [...(l.history || []), { at: now, action: 'Accepted', by: user?.name || 'Marketing Exec' }],
-        };
-      })
-    );
-    showToast('Lead accepted');
-  }, [showToast, user]);
-
-  const handleReject = useCallback((id) => {
-    setLeads((prev) =>
-      prev.map((l) => {
-        if (l.id !== id) return l;
-        const now = today();
-        return {
-          ...l,
-          status: 'Rejected',
-          lastUpdateAt: now,
-          history: [...(l.history || []), { at: now, action: 'Rejected', by: user?.name || 'Marketing Exec' }],
-        };
-      })
-    );
-    showToast('Lead rejected', 'error');
-  }, [showToast, user]);
-
-  const handleExport = useCallback(() => {
-    if (tabFiltered.length === 0) { showToast('No leads to export', 'error'); return; }
-    const rows = [
-      ['ID', 'Name', 'Mobile', 'Email', 'Source', 'Campaign', 'Status', 'Handover To', 'Submitted At', 'Accepted At'],
-      ...tabFiltered.map((l) => [
-        l.id, l.name, l.mobile, l.email, l.source, l.campaign,
-        l.status, l.handoverTo || '', l.submittedAt || '', l.acceptedAt || '',
-      ]),
-    ];
-    const csv = rows.map((r) => r.map((v) => `"${String(v ?? '').replace(/"/g, '""')}"`).join(',')).join('\n');
-    const blob = new Blob([csv], { type: 'text/csv' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `lead-handover-${Date.now()}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
-    showToast(`Exported ${tabFiltered.length} leads`);
-  }, [tabFiltered, showToast]);
-
-  const hasFilters = Boolean(searchQuery) || statusFilter !== 'All' || sourceFilter !== 'All';
-  const clearFilters = useCallback(() => {
-    setSearchQuery('');
-    setStatusFilter('All');
-    setSourceFilter('All');
-  }, []);
-
-  /* ── Modal / drawer open helpers ── */
-  const openCreate = useCallback(() => {
-    setEditing(null);
-    editingIdRef.current = null;
-    setShowModal(true);
-  }, []);
-
-  const openEdit = useCallback((lead) => {
-    setEditing(lead);
-    editingIdRef.current = lead.id;
-    setShowModal(true);
-  }, []);
-
   const closeModal = useCallback(() => {
     setShowModal(false);
     setEditing(null);
-    editingIdRef.current = null;
   }, []);
 
-  const openView = useCallback((lead) => {
-    setViewing(lead);
-    viewingIdRef.current = lead.id;
-  }, []);
+  const openCreate = useCallback(() => { setEditing(null); setShowModal(true); }, []);
+  const openEdit = useCallback((lead) => { setEditing(lead); setShowModal(true); }, []);
+  const openView = useCallback((lead) => setViewingId(lead.id), []);
+  const closeView = useCallback(() => setViewingId(null), []);
 
-  const closeView = useCallback(() => {
-    setViewing(null);
-    viewingIdRef.current = null;
-  }, []);
+  const handleCreate = (data) => {
+    const now = today();
+    const status = data.status || 'New';
+    const newLead = {
+      ...data,
+      id: nextLeadId(leads), // computed outside the state updater (safe in StrictMode)
+      status,
+      submittedAt: status === 'Submitted' ? now : null,
+      acceptedAt: status === 'Accepted' ? now : null,
+      lastUpdateAt: now,
+      history: [{ at: now, action: 'Created', by: actor }],
+    };
+    setLeads((prev) => [newLead, ...prev]);
+    closeModal();
+    showToast(`Lead "${data.name}" added`);
+  };
+
+  const handleEdit = (id, updates) => {
+    setLeads((prev) =>
+      prev.map((l) => {
+        if (l.id !== id) return l;
+        if (updates.status !== l.status) {
+          return transition(l, updates.status, actor, updates);
+        }
+        const now = today();
+        return {
+          ...l,
+          ...updates,
+          lastUpdateAt: now,
+          history: [...(l.history || []), { at: now, action: 'Edited', by: actor }],
+        };
+      })
+    );
+    closeModal();
+    showToast('Lead updated');
+  };
+
+  const handleDelete = (id) => {
+    setLeads((prev) => prev.filter((l) => l.id !== id));
+    setConfirmDelete(null);
+    if (viewingId === id) setViewingId(null);
+    showToast('Lead deleted', 'error');
+  };
+
+  /* Status change from the drawer chips */
+  const handleStatusChange = (id, newStatus) => {
+    const lead = leads.find((l) => l.id === id);
+    if (!lead || lead.status === newStatus) return;
+    if (ASSIGNED_STATUSES.includes(newStatus) && !lead.handoverTo) {
+      showToast('Assign a manager first (use Submit to Manager).', 'error');
+      return;
+    }
+    setLeads((prev) => prev.map((l) => (l.id === id ? transition(l, newStatus, actor) : l)));
+    showToast(`Status → ${newStatus}`);
+  };
+
+  const handleSubmitToManager = (id, manager) => {
+    if (!manager) { showToast('Select a manager before submitting.', 'error'); return; }
+    setLeads((prev) =>
+      prev.map((l) => (l.id === id ? transition(l, 'Submitted', actor, { handoverTo: manager }) : l))
+    );
+    showToast(`Submitted to ${manager}`);
+  };
+
+  const handleAccept = (id) => {
+    const lead = leads.find((l) => l.id === id);
+    if (!lead || lead.status !== 'Submitted') return;
+    setLeads((prev) => prev.map((l) => (l.id === id ? transition(l, 'Accepted', actor) : l)));
+    showToast('Lead accepted');
+  };
+
+  const handleReject = (id) => {
+    const lead = leads.find((l) => l.id === id);
+    if (!lead || lead.status !== 'Submitted') return;
+    setLeads((prev) => prev.map((l) => (l.id === id ? transition(l, 'Rejected', actor) : l)));
+    showToast('Lead rejected', 'error');
+  };
+
+  /* Quick action from inside the edit modal — saves the form changes together with the action */
+  const handleModalAction = (id, newStatus, formData) => {
+    setLeads((prev) => prev.map((l) => (l.id === id ? transition(l, newStatus, actor, formData) : l)));
+    closeModal();
+    showToast(
+      newStatus === 'Submitted' ? `Submitted to ${formData.handoverTo}` :
+      newStatus === 'Accepted' ? 'Lead accepted' : 'Lead rejected',
+      newStatus === 'Rejected' ? 'error' : 'success'
+    );
+  };
+
+  const handleExport = () => {
+    if (tabFiltered.length === 0) { showToast('No leads to export', 'error'); return; }
+    const rows = [
+      ['ID', 'Name', 'Mobile', 'Email', 'City', 'Source', 'Campaign', 'Project', 'Status', 'Priority', 'Handover To', 'Submitted At', 'Accepted At'],
+      ...tabFiltered.map((l) => [
+        l.id, l.name, l.mobile, l.email, l.city, l.source, l.campaign, l.project,
+        l.status, l.priority, l.handoverTo || '', l.submittedAt || '', l.acceptedAt || '',
+      ]),
+    ];
+    downloadCsv(rows, `lead-handover-${Date.now()}.csv`);
+    showToast(`Exported ${tabFiltered.length} leads`);
+  };
+
+  const hasFilters = Boolean(searchQuery) || statusFilter !== 'All' || sourceFilter !== 'All';
+  const clearFilters = () => {
+    setSearchQuery('');
+    setStatusFilter('All');
+    setSourceFilter('All');
+  };
 
   return (
     <div className="relative min-h-screen overflow-hidden bg-gradient-to-b from-[#FDF8FE] via-white to-[#FBF3FF]">
@@ -444,12 +486,12 @@ export default function LeadHandover() {
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            <button
+            {/* <button
               onClick={handleExport}
               className="group inline-flex items-center gap-2 rounded-full border border-brand-lilac bg-white px-4 py-2 text-xs font-semibold text-brand-ink shadow-sm transition-all hover:-translate-y-0.5 hover:border-brand-magenta/40 hover:shadow-md"
             >
               <Download size={14} className="transition-transform group-hover:translate-y-0.5" /> Export
-            </button>
+            </button> */}
             <button
               onClick={openCreate}
               className="group inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-brand-magenta to-brand-purple px-4 py-2 text-xs font-semibold text-white shadow-[0_6px_18px_-6px_rgba(227,28,121,0.6)] transition-all hover:-translate-y-0.5 hover:brightness-110"
@@ -470,11 +512,11 @@ export default function LeadHandover() {
           </div>
 
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-5">
-            <KpiCard icon={Users}        label="Total"     value={summary.total}    sub="All handover leads"   color="purple"  delay={0} />
-            <KpiCard icon={Clock}        label="Ready"     value={summary.ready}    sub="Awaiting submission"  color="amber"   delay={40} />
-            <KpiCard icon={Send}         label="Pending"   value={summary.pending}  sub="Submitted to manager" color="purple"  delay={80} />
-            <KpiCard icon={CheckCircle2} label="Accepted"  value={summary.accepted} sub="Moved to pipeline"    color="emerald" delay={120} />
-            <KpiCard icon={XCircle}      label="Rejected"  value={summary.rejected} sub="Not accepted"         color="rose"    delay={160} />
+            <KpiCard icon={Users}        label="Total"    value={summary.total}    sub="All handover leads"   color="purple"  delay={0} />
+            <KpiCard icon={Clock}        label="Ready"    value={summary.ready}    sub="Awaiting submission"  color="amber"   delay={40} />
+            <KpiCard icon={Send}         label="Pending"  value={summary.pending}  sub="Submitted to manager" color="purple"  delay={80} />
+            <KpiCard icon={CheckCircle2} label="Accepted" value={summary.accepted} sub="Moved to pipeline"    color="emerald" delay={120} />
+            <KpiCard icon={XCircle}      label="Rejected" value={summary.rejected} sub="Not accepted"         color="rose"    delay={160} />
           </div>
         </div>
 
@@ -488,7 +530,7 @@ export default function LeadHandover() {
               return (
                 <button
                   key={t.key}
-                  onClick={() => setActiveTab(t.key)}
+                  onClick={() => { setActiveTab(t.key); setStatusFilter('All'); }}
                   className={`group inline-flex shrink-0 items-center gap-1.5 rounded-full px-3.5 py-2 text-xs font-semibold transition-all duration-200 ${
                     active
                       ? 'bg-gradient-to-r from-brand-magenta to-brand-purple text-white shadow-[0_4px_14px_-4px_rgba(227,28,121,0.5)] scale-[1.02]'
@@ -515,11 +557,11 @@ export default function LeadHandover() {
             <input
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search by name, mobile, email, source…"
+              placeholder="Search by name, ID, mobile, email, city, source…"
               className="w-full rounded-full border border-brand-lilac bg-white py-2.5 pl-11 pr-10 text-sm outline-none focus:border-brand-magenta focus:ring-2 focus:ring-brand-magenta/15"
             />
             {searchQuery && (
-              <button onClick={() => setSearchQuery('')} className="absolute right-3 top-1/2 -translate-y-1/2 rounded-full p-1 hover:bg-brand-lilac">
+              <button onClick={() => setSearchQuery('')} className="absolute right-3 top-1/2 -translate-y-1/2 rounded-full p-1 hover:bg-brand-lilac" aria-label="Clear search">
                 <X size={14} className="text-brand-ink/50" />
               </button>
             )}
@@ -560,7 +602,7 @@ export default function LeadHandover() {
               onClick={() => setViewMode('grid')}
               className={`rounded-full p-1.5 transition-all ${
                 viewMode === 'grid'
-                  ? 'border border-brand-magenta bg-brand-magenta/10 text-brand-magenta'
+                  ? 'bg-brand-magenta/10 text-brand-magenta'
                   : 'text-brand-ink/50 hover:bg-brand-lilac/30'
               }`}
               title="Grid view"
@@ -571,7 +613,7 @@ export default function LeadHandover() {
               onClick={() => setViewMode('list')}
               className={`rounded-full p-1.5 transition-all ${
                 viewMode === 'list'
-                  ? 'border border-brand-magenta bg-brand-magenta/10 text-brand-magenta'
+                  ? 'bg-brand-magenta/10 text-brand-magenta'
                   : 'text-brand-ink/50 hover:bg-brand-lilac/30'
               }`}
               title="List view"
@@ -585,20 +627,21 @@ export default function LeadHandover() {
         {tabFiltered.length === 0 ? (
           <EmptyState hasFilters={hasFilters} onClear={clearFilters} onCreate={openCreate} />
         ) : viewMode === 'grid' ? (
-          <div className="grid grid-cols-1 gap-4 pb-40 md:grid-cols-2 xl:grid-cols-3">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
             {tabFiltered.map((l) => (
               <LeadCard
                 key={l.id}
                 lead={l}
                 onView={() => openView(l)}
                 onEdit={() => openEdit(l)}
+                onDelete={() => setConfirmDelete(l)}
               />
             ))}
           </div>
         ) : (
           <div className="card !p-0 overflow-hidden">
             <div className="overflow-x-auto">
-              <table className="w-full text-left text-sm">
+              <table className="w-full min-w-[900px] text-left text-sm">
                 <thead className="border-b border-brand-lilac/60 bg-brand-mist/40 text-[11px] font-bold uppercase tracking-wider text-brand-ink/60">
                   <tr>
                     <th className="px-5 py-3">Lead</th>
@@ -618,7 +661,7 @@ export default function LeadHandover() {
                       <tr key={l.id} className="transition-colors hover:bg-brand-mist/30">
                         <td className="px-5 py-3">
                           <div className="flex items-center gap-2.5">
-                            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-brand-magenta to-brand-purple text-white text-[10px] font-bold">
+                            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-brand-magenta to-brand-purple text-[10px] font-bold text-white">
                               {initialsOf(l.name)}
                             </span>
                             <div className="min-w-0">
@@ -631,7 +674,7 @@ export default function LeadHandover() {
                         </td>
                         <td className="px-5 py-3 text-brand-ink/70">{l.source}</td>
                         <td className="px-5 py-3">
-                          <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase ${st.chip}`}>
+                          <span className={`inline-flex items-center gap-1 whitespace-nowrap rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase ${st.chip}`}>
                             <StatusIcon size={10} />
                             {l.status}
                           </span>
@@ -640,22 +683,11 @@ export default function LeadHandover() {
                         <td className="px-5 py-3 font-mono text-[11px] text-brand-ink/60">{l.submittedAt ? formatShortDate(l.submittedAt) : '—'}</td>
                         <td className="px-5 py-3 font-mono text-[11px] text-brand-ink/60">{l.acceptedAt ? formatShortDate(l.acceptedAt) : '—'}</td>
                         <td className="px-5 py-3">
-                          <div className="flex items-center justify-end gap-1.5">
-                            <button
-                              onClick={() => openView(l)}
-                              className="flex h-8 w-8 items-center justify-center rounded-lg border border-brand-lilac bg-white text-brand-ink/60 transition-all hover:border-brand-magenta/40 hover:bg-brand-magenta/5 hover:text-brand-magenta"
-                              title="View details"
-                            >
-                              <Eye size={13} />
-                            </button>
-                            <button
-                              onClick={() => openEdit(l)}
-                              className="flex h-8 items-center gap-1.5 rounded-lg bg-gradient-to-r from-brand-magenta to-brand-purple px-2.5 text-[11px] font-semibold text-white shadow-card transition-all hover:brightness-110"
-                              title="Edit lead"
-                            >
-                              <Pencil size={11} /> Edit
-                            </button>
-                          </div>
+                          <RowActions
+                            onView={() => openView(l)}
+                            onEdit={() => openEdit(l)}
+                            onDelete={() => setConfirmDelete(l)}
+                          />
                         </td>
                       </tr>
                     );
@@ -671,34 +703,24 @@ export default function LeadHandover() {
           <LeadModal
             mode={editing ? 'edit' : 'create'}
             initial={editing}
-            defaultHandoverTo={MANAGERS[0]}
             managers={MANAGERS}
+            existingLeads={leads}
             onClose={closeModal}
             onSubmit={(data) => (editing ? handleEdit(editing.id, data) : handleCreate(data))}
-            onDelete={editing ? () => { setShowModal(false); setConfirmDelete(editing); } : null}
-            onSubmitToManager={editing ? (manager) => {
-              handleSubmitToManager(editing.id, manager);
-              closeModal();
-            } : null}
-            onAccept={editing ? () => {
-              handleAccept(editing.id);
-              closeModal();
-            } : null}
-            onReject={editing ? () => {
-              handleReject(editing.id);
-              closeModal();
-            } : null}
+            onDelete={editing ? () => { const lead = editing; closeModal(); setConfirmDelete(lead); } : null}
+            onAction={editing ? (status, data) => handleModalAction(editing.id, status, data) : null}
           />
         )}
 
         {viewing && (
           <LeadDetailDrawer
             lead={viewing}
+            managers={MANAGERS}
             onClose={closeView}
             onEdit={() => { const lead = viewing; closeView(); openEdit(lead); }}
-            onSubmit={() => { handleSubmitToManager(viewing.id, viewing.handoverTo); }}
-            onAccept={() => { handleAccept(viewing.id); }}
-            onReject={() => { handleReject(viewing.id); }}
+            onSubmit={(manager) => handleSubmitToManager(viewing.id, manager)}
+            onAccept={() => handleAccept(viewing.id)}
+            onReject={() => handleReject(viewing.id)}
             onStatusChange={(s) => handleStatusChange(viewing.id, s)}
             onDelete={() => { const lead = viewing; closeView(); setConfirmDelete(lead); }}
           />
@@ -724,7 +746,7 @@ export default function LeadHandover() {
    KPI CARD
    ═══════════════════════════════════════════════════════════════ */
 function KpiCard({ icon: Icon, label, value, sub, color = 'purple', delay = 0 }) {
-  const displayValue = useAnimatedCount(value);
+  const animated = useAnimatedCount(value);
   const themes = {
     purple:  { border: 'border-violet-200 hover:border-violet-400', bg: 'from-violet-50 via-violet-50/30 to-white', iconBg: 'bg-violet-100 text-brand-purple border-violet-200', bar: 'from-brand-purple to-brand-magenta', glow: 'bg-brand-purple/25', shadow: 'hover:shadow-[0_15px_40px_-15px_rgba(139,47,214,0.45)]', valueColor: 'text-brand-purple' },
     emerald: { border: 'border-emerald-200 hover:border-emerald-400', bg: 'from-emerald-50 via-emerald-50/30 to-white', iconBg: 'bg-emerald-100 text-emerald-600 border-emerald-200', bar: 'from-emerald-500 to-emerald-400', glow: 'bg-emerald-500/25', shadow: 'hover:shadow-[0_15px_40px_-15px_rgba(16,185,129,0.4)]', valueColor: 'text-emerald-600' },
@@ -749,7 +771,7 @@ function KpiCard({ icon: Icon, label, value, sub, color = 'purple', delay = 0 })
       </div>
 
       <div className="relative z-10 w-full">
-        <p className={`truncate font-display text-2xl font-bold leading-tight tabular-nums ${t.valueColor}`}>{displayValue}</p>
+        <p className={`truncate font-display text-2xl font-bold leading-tight tabular-nums ${t.valueColor}`}>{animated.toLocaleString('en-IN')}</p>
         <p className="mt-0.5 text-xs font-semibold text-brand-ink/75">{label}</p>
         {sub && <p className="mt-0.5 font-mono text-[10px] uppercase tracking-wider text-brand-ink/50">{sub}</p>}
       </div>
@@ -757,44 +779,53 @@ function KpiCard({ icon: Icon, label, value, sub, color = 'purple', delay = 0 })
   );
 }
 
+/* Animates from the previous value (not from 0) */
 function useAnimatedCount(target, duration = 600) {
   const [display, setDisplay] = useState(0);
-  const startRef = useRef(null);
+  const fromRef = useRef(0);
   const rafRef = useRef(null);
 
   useEffect(() => {
-    const to = Number(target) || 0;
-
-    // Skip animation entirely for zero/negative targets — avoids needless RAF churn
-    if (to <= 0) {
-      setDisplay(0);
-      return undefined;
-    }
-
-    startRef.current = null;
+    const to = Number.isFinite(Number(target)) ? Number(target) : 0;
+    const from = fromRef.current;
+    let start = null;
     const tick = (now) => {
-      if (startRef.current === null) startRef.current = now;
-      const elapsed = now - startRef.current;
-      const progress = Math.min(elapsed / duration, 1);
+      if (start === null) start = now;
+      const progress = Math.min((now - start) / duration, 1);
       const eased = 1 - Math.pow(1 - progress, 3);
-      setDisplay(Math.round(to * eased));
+      const val = Math.round(from + (to - from) * eased);
+      fromRef.current = val;
+      setDisplay(val);
       if (progress < 1) rafRef.current = requestAnimationFrame(tick);
     };
     rafRef.current = requestAnimationFrame(tick);
     return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); };
   }, [target, duration]);
 
-  return display.toLocaleString('en-IN');
+  return display;
 }
 
 /* ═══════════════════════════════════════════════════════════════
    DROPDOWN FILTER
    ═══════════════════════════════════════════════════════════════ */
 function DropdownFilter({ label, icon: Icon, value, options, open, onToggle, onChange }) {
+  const triggerRef = useRef(null);
+  const [openUp, setOpenUp] = useState(false);
+
+  const handleToggle = () => {
+    if (!open) {
+      const rect = triggerRef.current?.getBoundingClientRect();
+      if (rect) setOpenUp(window.innerHeight - rect.bottom < 320);
+    }
+    onToggle();
+  };
+
   return (
     <div className="relative">
       <button
-        onClick={onToggle}
+        ref={triggerRef}
+        onClick={handleToggle}
+        aria-expanded={open}
         className="inline-flex items-center gap-2 rounded-full border border-brand-lilac bg-white px-4 py-2.5 text-sm font-medium text-brand-ink hover:bg-brand-lilac/40"
       >
         {Icon && <Icon size={14} className="text-brand-magenta" />}
@@ -804,7 +835,7 @@ function DropdownFilter({ label, icon: Icon, value, options, open, onToggle, onC
       {open && (
         <>
           <div className="fixed inset-0 z-10" onClick={onToggle} />
-          <div className="absolute right-0 top-full z-30 mt-2 max-h-72 w-56 overflow-y-auto no-scrollbar rounded-xl border border-brand-lilac bg-white p-1 shadow-panel">
+          <div className={`absolute right-0 ${openUp ? 'bottom-full mb-2' : 'top-full mt-2'} z-30 max-h-72 w-56 overflow-y-auto no-scrollbar rounded-xl border border-brand-lilac bg-white p-1 shadow-panel`}>
             {options.map((o) => (
               <button
                 key={o}
@@ -826,13 +857,47 @@ function DropdownFilter({ label, icon: Icon, value, options, open, onToggle, onC
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   LEAD CARD (GRID) - FIXED FOR NAME AND BADGE
+   ROW ACTIONS (table) — View · Edit · Delete
    ═══════════════════════════════════════════════════════════════ */
-function LeadCard({ lead: l, onView, onEdit }) {
+function RowActions({ onView, onEdit, onDelete }) {
+  const base = 'inline-flex h-8 w-8 items-center justify-center rounded-lg border transition-all';
+  return (
+    <div className="flex items-center justify-end gap-1.5">
+      <button
+        onClick={onView}
+        title="View details"
+        aria-label="View details"
+        className={`${base} border-brand-lilac bg-white text-brand-ink/60 hover:border-brand-magenta/40 hover:bg-brand-magenta/5 hover:text-brand-magenta`}
+      >
+        <Eye size={13} />
+      </button>
+      <button
+        onClick={onEdit}
+        title="Edit lead"
+        aria-label="Edit lead"
+        className={`${base} border-transparent bg-gradient-to-r from-brand-magenta to-brand-purple text-white shadow-card hover:brightness-110`}
+      >
+        <Pencil size={13} />
+      </button>
+      <button
+        onClick={onDelete}
+        title="Delete lead"
+        aria-label="Delete lead"
+        className={`${base} border-rose-200 bg-rose-50 text-rose-500 hover:bg-rose-100`}
+      >
+        <Trash2 size={13} />
+      </button>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   LEAD CARD (GRID)
+   ═══════════════════════════════════════════════════════════════ */
+function LeadCard({ lead: l, onView, onEdit, onDelete }) {
   const st = STATUS_STYLES[l.status] || STATUS_STYLES.New;
   const StatusIcon = st.icon;
 
-  // Helper to get short status text for badge
   const getShortStatus = (status) => {
     if (status === 'Ready for Handover') return 'Ready';
     if (status === 'Under Review') return 'Review';
@@ -844,26 +909,23 @@ function LeadCard({ lead: l, onView, onEdit }) {
       <span className="pointer-events-none absolute inset-x-0 top-0 h-1 origin-left scale-x-0 rounded-t-2xl bg-gradient-to-r from-brand-magenta to-brand-purple transition-transform duration-500 group-hover:scale-x-100" />
 
       <div className="relative flex flex-1 flex-col p-5">
-        {/* Header Section - Fixed Alignment */}
         <div className="flex items-start gap-3">
-          <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-brand-magenta to-brand-purple text-white text-sm font-bold shadow-md">
+          <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-brand-magenta to-brand-purple text-sm font-bold text-white shadow-md">
             {initialsOf(l.name)}
           </span>
-          
-          {/* Name Container - Allowing wrapping */}
+
           <div className="min-w-0 flex-1 pr-1">
             <button
               onClick={onView}
-              className="block w-full text-left font-display text-base font-semibold text-brand-ink hover:text-brand-magenta leading-tight whitespace-normal break-words"
+              className="block w-full whitespace-normal break-words text-left font-display text-base font-semibold leading-tight text-brand-ink hover:text-brand-magenta"
               title={l.name}
             >
               {l.name}
             </button>
-            <p className="truncate text-[11px] font-mono text-brand-ink/50 mt-0.5">{l.id}</p>
+            <p className="mt-0.5 truncate font-mono text-[11px] text-brand-ink/50">{l.id}</p>
           </div>
 
-          {/* Badge - Made smaller and fixed */}
-          <span 
+          <span
             className={`shrink-0 rounded-full border px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider ${st.chip}`}
             title={l.status}
           >
@@ -872,7 +934,6 @@ function LeadCard({ lead: l, onView, onEdit }) {
           </span>
         </div>
 
-        {/* Info Grid */}
         <div className="mt-4 space-y-2 rounded-xl border border-brand-lilac/60 bg-gradient-to-br from-brand-mist/80 to-brand-mist/40 p-3 text-xs">
           <div className="grid grid-cols-[auto_1fr_auto] items-center gap-2">
             <Globe size={11} className="shrink-0 text-brand-ink/50" />
@@ -882,7 +943,7 @@ function LeadCard({ lead: l, onView, onEdit }) {
           <div className="grid grid-cols-[auto_1fr_auto] items-center gap-2">
             <Megaphone size={11} className="shrink-0 text-brand-ink/50" />
             <span className="truncate text-brand-ink/50">Campaign</span>
-            <span className="truncate text-right font-semibold text-brand-ink">{l.campaign}</span>
+            <span className="truncate text-right font-semibold text-brand-ink">{l.campaign || '—'}</span>
           </div>
           <div className="grid grid-cols-[auto_1fr_auto] items-center gap-2">
             <UserCheck size={11} className="shrink-0 text-brand-ink/50" />
@@ -896,23 +957,21 @@ function LeadCard({ lead: l, onView, onEdit }) {
           </div>
         </div>
 
-        {/* Priority & Project Row */}
         <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-brand-lilac/60 bg-brand-mist/40 px-3 py-2">
           <div className="min-w-0 flex-1">
             <p className="font-mono text-[9px] uppercase tracking-wider text-brand-ink/50">Priority</p>
-            <p className={`truncate font-display text-sm font-bold ${
-              l.priority === 'High' ? 'text-brand-magenta' : l.priority === 'Medium' ? 'text-amber-600' : 'text-emerald-600'
-            }`}>
+            <p className={`truncate font-display text-sm font-bold ${PRIORITY_TEXT[l.priority] || PRIORITY_TEXT.Medium}`}>
               {l.priority}
             </p>
           </div>
-          <span className="shrink-0 rounded-full bg-brand-mist px-2.5 py-1 font-mono text-[9px] font-bold uppercase tracking-wider text-brand-ink/60 max-w-[120px] truncate">
-            {l.project}
-          </span>
+          {l.project && (
+            <span className="max-w-[120px] shrink-0 truncate rounded-full bg-brand-mist px-2.5 py-1 font-mono text-[9px] font-bold uppercase tracking-wider text-brand-ink/60" title={l.project}>
+              {l.project}
+            </span>
+          )}
         </div>
 
-        {/* Buttons */}
-        <div className="mt-4 grid grid-cols-2 gap-2">
+        <div className="mt-4 grid grid-cols-3 gap-2">
           <button
             onClick={onView}
             className="flex min-w-0 items-center justify-center gap-1.5 rounded-xl border border-brand-lilac bg-white px-2 py-2 text-xs font-semibold text-brand-ink transition-all hover:border-brand-magenta/40 hover:bg-brand-magenta/5 hover:text-brand-magenta"
@@ -927,6 +986,13 @@ function LeadCard({ lead: l, onView, onEdit }) {
             <Pencil size={12} className="shrink-0" />
             <span className="truncate">Edit</span>
           </button>
+          <button
+            onClick={onDelete}
+            className="flex min-w-0 items-center justify-center gap-1.5 rounded-xl border border-rose-200 bg-rose-50 px-2 py-2 text-xs font-semibold text-rose-500 transition-all hover:bg-rose-100"
+          >
+            <Trash2 size={12} className="shrink-0" />
+            <span className="truncate">Delete</span>
+          </button>
         </div>
       </div>
     </div>
@@ -934,11 +1000,11 @@ function LeadCard({ lead: l, onView, onEdit }) {
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   LEAD MODAL (Create / Edit + All Actions)
+   LEAD MODAL (Create / Edit + Quick Actions)
    ═══════════════════════════════════════════════════════════════ */
 function LeadModal({
-  mode = 'create', initial = null, defaultHandoverTo, managers,
-  onClose, onSubmit, onDelete, onSubmitToManager, onAccept, onReject,
+  mode = 'create', initial = null, managers, existingLeads = [],
+  onClose, onSubmit, onDelete, onAction,
 }) {
   const seed = initial || {};
   const isEdit = mode === 'edit';
@@ -953,7 +1019,7 @@ function LeadModal({
     project: seed.project || '',
     status: seed.status || 'New',
     priority: seed.priority || 'Medium',
-    handoverTo: seed.handoverTo || defaultHandoverTo || '',
+    handoverTo: seed.handoverTo || '',
     notes: seed.notes || '',
   });
   const [error, setError] = useState('');
@@ -962,14 +1028,38 @@ function LeadModal({
   const submitTimerRef = useRef(null);
 
   useEffect(() => { nameRef.current?.focus(); }, []);
+  useEscape(true, () => { if (!submitting) onClose(); });
   useEffect(() => () => { if (submitTimerRef.current) clearTimeout(submitTimerRef.current); }, []);
 
-  const validate = () => {
+  const set = (patch) => { setForm((f) => ({ ...f, ...patch })); setError(''); };
+
+  const validate = ({ requireManager = false } = {}) => {
     if (!form.name.trim()) return 'Name is required.';
     if (!/^\d{10}$/.test(form.mobile.trim())) return 'Mobile must be exactly 10 digits.';
-    if (form.email && !/^\S+@\S+\.\S+$/.test(form.email)) return 'Enter a valid email.';
+    if (form.email.trim() && !/^\S+@\S+\.\S+$/.test(form.email.trim())) return 'Enter a valid email.';
+
+    // Same number twice is only allowed when the lead is being flagged as a Duplicate
+    if (form.status !== 'Duplicate') {
+      const dup = existingLeads.find((l) => l.mobile === form.mobile.trim() && l.id !== seed.id);
+      if (dup) return `A lead with this mobile already exists (${dup.name}, ${dup.id}). Mark this one as Duplicate if intended.`;
+    }
+
+    if ((requireManager || ASSIGNED_STATUSES.includes(form.status)) && !form.handoverTo) {
+      return 'Select a manager in "Handover To" for submitted, accepted or rejected leads.';
+    }
     return null;
   };
+
+  const buildPayload = () => ({
+    ...form,
+    name: form.name.trim(),
+    mobile: form.mobile.trim(),
+    email: form.email.trim(),
+    city: form.city.trim(),
+    campaign: form.campaign.trim(),
+    project: form.project.trim(),
+    notes: form.notes.trim(),
+  });
 
   const handleSubmit = (e) => {
     e.preventDefault();
@@ -980,12 +1070,24 @@ function LeadModal({
     if (submitTimerRef.current) clearTimeout(submitTimerRef.current);
     submitTimerRef.current = setTimeout(() => {
       setSubmitting(false);
-      onSubmit(form);
+      onSubmit(buildPayload());
     }, 250);
   };
 
+  /* Quick actions save any form edits together with the action */
+  const runAction = (newStatus) => {
+    const err = validate({ requireManager: newStatus !== 'Rejected' && newStatus !== 'Accepted' ? true : false });
+    if (err) { setError(err); return; }
+    onAction?.(newStatus, buildPayload());
+  };
+
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4 backdrop-blur-sm">
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={isEdit ? 'Edit Handover Lead' : 'Add New Lead for Handover'}
+      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4 backdrop-blur-sm"
+    >
       <div className="my-8 w-full max-w-3xl rounded-2xl bg-white shadow-panel">
         <div className="flex items-center justify-between gap-3 border-b border-brand-lilac/60 px-6 py-4">
           <div className="flex items-center gap-3">
@@ -1001,36 +1103,38 @@ function LeadModal({
               </p>
             </div>
           </div>
-          <button onClick={onClose} className="rounded-lg p-2 text-brand-ink/50 hover:bg-brand-lilac">
+          <button onClick={onClose} className="rounded-lg p-2 text-brand-ink/50 hover:bg-brand-lilac" aria-label="Close">
             <X size={18} />
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="max-h-[75vh] space-y-5 overflow-y-auto p-6">
+        <form onSubmit={handleSubmit} noValidate className="max-h-[75vh] space-y-5 overflow-y-auto p-6">
           <SectionTitle icon={Users} label="Contact Information" />
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <ModalInput
               inputRef={nameRef}
               label="Full Name *"
               value={form.name}
-              onChange={(v) => { setForm({ ...form, name: v }); setError(''); }}
+              onChange={(v) => set({ name: v })}
               placeholder="e.g. John Doe"
               icon={Users}
             />
             <ModalInput
               label="Mobile *"
+              inputMode="numeric"
+              maxLength={10}
               value={form.mobile}
-              onChange={(v) => setForm({ ...form, mobile: v.replace(/\D/g, '').slice(0, 10) })}
+              onChange={(v) => set({ mobile: v.replace(/\D/g, '').slice(0, 10) })}
               placeholder="10-digit number"
-              icon={Zap}
+              icon={Phone}
             />
             <ModalInput
               label="Email"
               type="email"
               value={form.email}
-              onChange={(v) => setForm({ ...form, email: v })}
+              onChange={(v) => set({ email: v })}
               placeholder="e.g. john@example.com"
-              icon={Star}
+              icon={Mail}
             />
             <ModalInput
               label="City"
@@ -1071,7 +1175,7 @@ function LeadModal({
               <label className="mb-1.5 block text-xs font-semibold text-brand-ink/70">Handover To (Manager)</label>
               <select
                 value={form.handoverTo}
-                onChange={(e) => setForm({ ...form, handoverTo: e.target.value })}
+                onChange={(e) => set({ handoverTo: e.target.value })}
                 className="w-full rounded-xl border border-brand-lilac bg-white px-3.5 py-2.5 text-sm outline-none focus:border-brand-magenta focus:ring-2 focus:ring-brand-magenta/15"
               >
                 <option value="">— Not Assigned —</option>
@@ -1093,7 +1197,7 @@ function LeadModal({
                     <button
                       key={s}
                       type="button"
-                      onClick={() => setForm({ ...form, status: s })}
+                      onClick={() => set({ status: s })}
                       className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold transition-all ${
                         active
                           ? `${st.chip} ring-2 ring-brand-magenta/20`
@@ -1148,30 +1252,30 @@ function LeadModal({
           {isEdit && (
             <div className="space-y-2 rounded-xl border border-brand-lilac/60 bg-brand-mist/40 p-4">
               <p className="font-mono text-[10px] font-bold uppercase tracking-wider text-brand-ink/60">
-                Quick Actions
+                Quick Actions <span className="font-normal normal-case tracking-normal text-brand-ink/40">(your edits above are saved too)</span>
               </p>
               <div className="flex flex-wrap gap-2">
-                {form.status !== 'Submitted' && form.status !== 'Accepted' && (
+                {seed.status !== 'Submitted' && seed.status !== 'Accepted' && (
                   <button
                     type="button"
-                    onClick={() => onSubmitToManager?.(form.handoverTo)}
+                    onClick={() => runAction('Submitted')}
                     className="inline-flex items-center gap-1.5 rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-semibold text-indigo-600 hover:bg-indigo-100"
                   >
                     <Send size={12} /> Submit to Manager
                   </button>
                 )}
-                {form.status === 'Submitted' && (
+                {seed.status === 'Submitted' && (
                   <>
                     <button
                       type="button"
-                      onClick={() => onAccept?.()}
+                      onClick={() => runAction('Accepted')}
                       className="inline-flex items-center gap-1.5 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-600 hover:bg-emerald-100"
                     >
                       <CheckCircle2 size={12} /> Accept
                     </button>
                     <button
                       type="button"
-                      onClick={() => onReject?.()}
+                      onClick={() => runAction('Rejected')}
                       className="inline-flex items-center gap-1.5 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-500 hover:bg-rose-100"
                     >
                       <XCircle size={12} /> Reject
@@ -1218,7 +1322,7 @@ function SectionTitle({ icon: Icon, label }) {
   );
 }
 
-function ModalInput({ label, type = 'text', value, onChange, placeholder, icon: Icon, required, inputRef }) {
+function ModalInput({ label, type = 'text', value, onChange, placeholder, icon: Icon, required, inputRef, inputMode, maxLength }) {
   return (
     <div>
       <label className="mb-1.5 block text-xs font-semibold text-brand-ink/70">{label}</label>
@@ -1229,6 +1333,8 @@ function ModalInput({ label, type = 'text', value, onChange, placeholder, icon: 
           type={type}
           value={value}
           required={required}
+          inputMode={inputMode}
+          maxLength={maxLength}
           onChange={(e) => onChange(e.target.value)}
           placeholder={placeholder}
           className={`w-full rounded-xl border border-brand-lilac bg-white py-2.5 ${Icon ? 'pl-10' : 'pl-3.5'} pr-3.5 text-sm outline-none focus:border-brand-magenta focus:ring-2 focus:ring-brand-magenta/15`}
@@ -1241,16 +1347,27 @@ function ModalInput({ label, type = 'text', value, onChange, placeholder, icon: 
 /* ═══════════════════════════════════════════════════════════════
    LEAD DETAIL DRAWER
    ═══════════════════════════════════════════════════════════════ */
-function LeadDetailDrawer({ lead: l, onClose, onEdit, onSubmit, onAccept, onReject, onStatusChange, onDelete }) {
+function LeadDetailDrawer({ lead: l, managers, onClose, onEdit, onSubmit, onAccept, onReject, onStatusChange, onDelete }) {
   const st = STATUS_STYLES[l.status] || STATUS_STYLES.New;
   const StatusIcon = st.icon;
+  const [manager, setManager] = useState(l.handoverTo || '');
+
+  useEscape(true, onClose);
+  useEffect(() => { setManager(l.handoverTo || ''); }, [l.id, l.handoverTo]);
+
+  const canSubmit = l.status !== 'Submitted' && l.status !== 'Accepted';
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end bg-black/40 backdrop-blur-sm">
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Lead details"
+      className="fixed inset-0 z-50 flex justify-end bg-black/40 backdrop-blur-sm"
+    >
       <div className="h-full w-full max-w-2xl overflow-y-auto bg-white shadow-panel animate-slide-in-right">
         <div className="sticky top-0 z-10 flex items-center justify-between gap-3 border-b border-brand-lilac bg-gradient-to-r from-brand-mist/60 to-white px-6 py-4 backdrop-blur-sm">
           <div className="flex items-center gap-3">
-            <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-brand-magenta to-brand-purple text-white text-sm font-bold shadow-sm">
+            <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-brand-magenta to-brand-purple text-sm font-bold text-white shadow-sm">
               {initialsOf(l.name)}
             </span>
             <div>
@@ -1258,7 +1375,7 @@ function LeadDetailDrawer({ lead: l, onClose, onEdit, onSubmit, onAccept, onReje
               <h3 className="font-display text-base font-bold text-brand-ink">{l.name}</h3>
             </div>
           </div>
-          <button onClick={onClose} className="rounded-lg p-2 text-brand-ink/50 hover:bg-brand-lilac">
+          <button onClick={onClose} className="rounded-lg p-2 text-brand-ink/50 hover:bg-brand-lilac" aria-label="Close">
             <X size={18} />
           </button>
         </div>
@@ -1273,11 +1390,7 @@ function LeadDetailDrawer({ lead: l, onClose, onEdit, onSubmit, onAccept, onReje
                 <UserCheck size={12} /> {l.handoverTo}
               </span>
             )}
-            <span className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-bold ${
-              l.priority === 'High' ? 'border-rose-200 bg-rose-50 text-brand-magenta' :
-              l.priority === 'Medium' ? 'border-amber-200 bg-amber-50 text-amber-600' :
-              'border-emerald-200 bg-emerald-50 text-emerald-600'
-            }`}>
+            <span className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-bold ${PRIORITY_CHIP[l.priority] || PRIORITY_CHIP.Medium}`}>
               <Flame size={12} /> {l.priority} Priority
             </span>
           </div>
@@ -1293,11 +1406,11 @@ function LeadDetailDrawer({ lead: l, onClose, onEdit, onSubmit, onAccept, onReje
                 <p className="font-mono text-[11px] text-brand-ink/50">{l.id}</p>
                 <div className="mt-2 flex flex-wrap gap-3 text-xs text-brand-ink/70">
                   <span className="inline-flex items-center gap-1.5">
-                    <Zap size={11} className="text-brand-magenta" /> {l.mobile}
+                    <Phone size={11} className="text-brand-magenta" /> {l.mobile}
                   </span>
                   {l.email && (
                     <span className="inline-flex items-center gap-1.5">
-                      <Star size={11} className="text-brand-magenta" /> {l.email}
+                      <Mail size={11} className="text-brand-magenta" /> {l.email}
                     </span>
                   )}
                   {l.city && (
@@ -1313,12 +1426,12 @@ function LeadDetailDrawer({ lead: l, onClose, onEdit, onSubmit, onAccept, onReje
           <div className="card !p-5 space-y-3">
             <SectionTitle icon={Send} label="Handover Details" />
             <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-              <InfoRow icon={Globe}        label="Source"       value={l.source} />
-              <InfoRow icon={Megaphone}    label="Campaign"     value={l.campaign} />
-              <InfoRow icon={Briefcase}    label="Project"      value={l.project} />
-              <InfoRow icon={UserCheck}    label="Handover To"  value={l.handoverTo || '—'} />
-              <InfoRow icon={Calendar}     label="Submitted"    value={l.submittedAt ? formatDate(l.submittedAt) : '—'} />
-              <InfoRow icon={CheckCircle2} label="Accepted"     value={l.acceptedAt ? formatDate(l.acceptedAt) : '—'} />
+              <InfoRow icon={Globe}        label="Source"      value={l.source} />
+              <InfoRow icon={Megaphone}    label="Campaign"    value={l.campaign || '—'} />
+              <InfoRow icon={Briefcase}    label="Project"     value={l.project || '—'} />
+              <InfoRow icon={UserCheck}    label="Handover To" value={l.handoverTo || '—'} />
+              <InfoRow icon={Calendar}     label="Submitted"   value={l.submittedAt ? formatDate(l.submittedAt) : '—'} />
+              <InfoRow icon={CheckCircle2} label="Accepted"    value={l.acceptedAt ? formatDate(l.acceptedAt) : '—'} />
             </div>
           </div>
 
@@ -1335,9 +1448,9 @@ function LeadDetailDrawer({ lead: l, onClose, onEdit, onSubmit, onAccept, onReje
             <div className="card !p-5">
               <SectionTitle icon={Activity} label="Handover History" />
               <div className="relative mt-3 space-y-3">
-                <span className="pointer-events-none absolute left-[7px] top-3 bottom-3 w-px bg-brand-lilac" />
-                {l.history.map((h, i) => (
-                  <div key={i} className="relative flex items-start gap-3">
+                <span className="pointer-events-none absolute bottom-3 left-[7px] top-3 w-px bg-brand-lilac" />
+                {[...l.history].reverse().map((h, i) => (
+                  <div key={`${h.at}-${h.action}-${i}`} className="relative flex items-start gap-3">
                     <span className="relative z-10 mt-1 h-3.5 w-3.5 shrink-0 rounded-full bg-gradient-to-br from-brand-magenta to-brand-purple ring-4 ring-white" />
                     <div className="min-w-0 flex-1">
                       <p className="text-sm font-medium text-brand-ink">{h.action}</p>
@@ -1361,10 +1474,11 @@ function LeadDetailDrawer({ lead: l, onClose, onEdit, onSubmit, onAccept, onReje
                 return (
                   <button
                     key={stt}
-                    onClick={() => onStatusChange(stt)}
+                    onClick={() => { if (!active) onStatusChange(stt); }}
+                    disabled={active}
                     className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold transition-all ${
                       active
-                        ? `${cs.chip} ring-2 ring-brand-magenta/20`
+                        ? `${cs.chip} ring-2 ring-brand-magenta/20 cursor-default`
                         : 'border-brand-lilac bg-white text-brand-ink/60 hover:bg-brand-lilac/30'
                     }`}
                   >
@@ -1377,15 +1491,29 @@ function LeadDetailDrawer({ lead: l, onClose, onEdit, onSubmit, onAccept, onReje
 
           <div className="card !p-5">
             <SectionTitle icon={Target} label="Actions" />
-            <div className="mt-3 flex flex-wrap gap-2">
-              {l.status !== 'Submitted' && l.status !== 'Accepted' && (
+
+            {canSubmit && (
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <select
+                  value={manager}
+                  onChange={(e) => setManager(e.target.value)}
+                  aria-label="Select manager"
+                  className="min-w-[180px] rounded-xl border border-brand-lilac bg-white px-3 py-2 text-xs outline-none focus:border-brand-magenta focus:ring-2 focus:ring-brand-magenta/15"
+                >
+                  <option value="">Select manager…</option>
+                  {managers.map((m) => <option key={m} value={m}>{m}</option>)}
+                </select>
                 <button
-                  onClick={onSubmit}
-                  className="inline-flex items-center gap-1.5 rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-semibold text-indigo-600 hover:bg-indigo-100"
+                  onClick={() => onSubmit(manager)}
+                  disabled={!manager}
+                  className="inline-flex items-center gap-1.5 rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-semibold text-indigo-600 hover:bg-indigo-100 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   <Send size={12} /> Submit to Manager
                 </button>
-              )}
+              </div>
+            )}
+
+            <div className="mt-3 flex flex-wrap gap-2">
               {l.status === 'Submitted' && (
                 <>
                   <button
@@ -1468,8 +1596,14 @@ function EmptyState({ hasFilters, onClear, onCreate }) {
 }
 
 function ConfirmDialog({ title, message, confirmLabel, onCancel, onConfirm }) {
+  useEscape(true, onCancel);
   return (
-    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm">
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={title}
+      className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm"
+    >
       <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-panel">
         <div className="mb-4 flex items-center gap-3">
           <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-rose-100 text-rose-500">
@@ -1493,7 +1627,7 @@ function ConfirmDialog({ title, message, confirmLabel, onCancel, onConfirm }) {
 
 function Toast({ message, type }) {
   return (
-    <div className="fixed bottom-6 left-1/2 z-[100] -translate-x-1/2">
+    <div role="status" aria-live="polite" className="fixed bottom-6 left-1/2 z-[100] -translate-x-1/2">
       <div className={`flex items-center gap-2 rounded-xl border px-4 py-3 text-sm font-semibold shadow-panel ${
         type === 'error' ? 'border-rose-200 bg-rose-50 text-rose-600' : 'border-emerald-200 bg-emerald-50 text-emerald-600'
       }`}>

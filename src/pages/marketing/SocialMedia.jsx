@@ -4,11 +4,10 @@ import {
   Plus, Search, Filter, ChevronDown, Eye, Pencil,
   Trash2, Copy, AlertCircle, CheckCircle2, X, Users,
   Clock, Zap, Target, TrendingUp, Calendar, Globe,
-  Inbox, Download, Grid3x3, List,
+  Inbox, Download, Grid3x3,
   Activity, Megaphone, Share2, BarChart3, Heart,
   MessageSquare, Radio,
 } from 'lucide-react';
-import { useAuth } from '../../context/AuthContext';
 
 /* ═══════════════════════════════════════════════════════════════
    INLINE BRAND ICONS
@@ -59,10 +58,10 @@ const PLATFORM_ICONS = {
 };
 
 const PLATFORM_THEMES = {
-  Facebook:  { fg: 'text-blue-600',    bg: 'bg-blue-50',    border: 'border-blue-200',   ring: 'ring-blue-200'   },
-  Instagram: { fg: 'text-pink-600',    bg: 'bg-pink-50',    border: 'border-pink-200',   ring: 'ring-pink-200'   },
-  YouTube:   { fg: 'text-red-600',     bg: 'bg-red-50',     border: 'border-red-200',    ring: 'ring-red-200'    },
-  LinkedIn:  { fg: 'text-sky-700',     bg: 'bg-sky-50',     border: 'border-sky-200',    ring: 'ring-sky-200'    },
+  Facebook:  { fg: 'text-blue-600',    bg: 'bg-blue-50',    border: 'border-blue-200',    ring: 'ring-blue-200'    },
+  Instagram: { fg: 'text-pink-600',    bg: 'bg-pink-50',    border: 'border-pink-200',    ring: 'ring-pink-200'    },
+  YouTube:   { fg: 'text-red-600',     bg: 'bg-red-50',     border: 'border-red-200',     ring: 'ring-red-200'     },
+  LinkedIn:  { fg: 'text-sky-700',     bg: 'bg-sky-50',     border: 'border-sky-200',     ring: 'ring-sky-200'     },
   WhatsApp:  { fg: 'text-emerald-600', bg: 'bg-emerald-50', border: 'border-emerald-200', ring: 'ring-emerald-200' },
 };
 
@@ -83,7 +82,13 @@ const loadState = (fallback) => {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) return parsed;
+      if (Array.isArray(parsed)) {
+        return parsed.map((p) => ({
+          leads: 0, qualified: 0, converted: 0, engagement: 0, enquiries: 0,
+          status: 'Active', campaign: '', post: '',
+          ...p,
+        }));
+      }
     }
   } catch { /* ignore */ }
   return fallback;
@@ -91,6 +96,27 @@ const loadState = (fallback) => {
 
 const saveState = (value) => {
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(value)); } catch { /* ignore */ }
+};
+
+/* CSV formula-injection guard */
+const csvCell = (v) => {
+  let s = String(v ?? '');
+  if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
+  return `"${s.replace(/"/g, '""')}"`;
+};
+
+/* Reliable CSV download (Firefox/Safari safe, Excel-friendly UTF-8 BOM) */
+const downloadCsv = (rows, filename) => {
+  const csv = rows.map((r) => r.map(csvCell).join(',')).join('\n');
+  const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 };
 
 const formatDate = (val) => {
@@ -107,25 +133,35 @@ const formatShortDate = (val) => {
   return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' });
 };
 
+/* Escape-key hook (stable listener, always calls latest handler) */
+function useEscape(enabled, handler) {
+  const handlerRef = useRef(handler);
+  useEffect(() => { handlerRef.current = handler; });
+  useEffect(() => {
+    if (!enabled) return undefined;
+    const onKey = (e) => { if (e.key === 'Escape') handlerRef.current(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [enabled]);
+}
+
 /* ═══════════════════════════════════════════════════════════════
    SEED DATA
    ═══════════════════════════════════════════════════════════════ */
 const SEED_POSTS = [
-  { id: uid('post'), platform: 'Facebook',  campaign: 'Summer Sale 2024',    post: 'Summer Sale Carousel',       leads: 45, qualified: 12, converted: 4, engagement: 4.5,  enquiries: 18, status: 'Boosted',  createdAt: new Date('2024-06-01').toISOString() },
-  { id: uid('post'), platform: 'Facebook',  campaign: 'Brand Awareness',     post: 'Testimonial Video',          leads: 38, qualified: 10, converted: 3, engagement: 4.2,  enquiries: 15, status: 'Active',   createdAt: new Date('2024-06-05').toISOString() },
-  { id: uid('post'), platform: 'Instagram', campaign: 'Reel Campaign',       post: 'Reel - Product Demo',        leads: 32, qualified: 8,  converted: 2, engagement: 5.2,  enquiries: 12, status: 'Boosted',  createdAt: new Date('2024-06-03').toISOString() },
-  { id: uid('post'), platform: 'Instagram', campaign: 'Festival Promo',      post: 'Diwali Special Story',       leads: 28, qualified: 7,  converted: 2, engagement: 6.1,  enquiries: 10, status: 'Active',   createdAt: new Date('2024-06-07').toISOString() },
-  { id: uid('post'), platform: 'YouTube',   campaign: 'Product Demo',        post: 'Full Demo Walkthrough',      leads: 40, qualified: 15, converted: 6, engagement: 2.1,  enquiries: 20, status: 'Active',   createdAt: new Date('2024-06-02').toISOString() },
-  { id: uid('post'), platform: 'LinkedIn',  campaign: 'B2B Outreach',        post: 'Case Study Article',         leads: 60, qualified: 25, converted: 8, engagement: 3.8,  enquiries: 22, status: 'Boosted',  createdAt: new Date('2024-06-04').toISOString() },
-  { id: uid('post'), platform: 'WhatsApp',  campaign: 'Broadcast',           post: 'Promo Broadcast Message',    leads: 150, qualified: 40, converted: 12, engagement: 12,  enquiries: 55, status: 'Active',   createdAt: new Date('2024-06-06').toISOString() },
+  { id: uid('post'), platform: 'Facebook',  campaign: 'Summer Sale 2024', post: 'Summer Sale Carousel',    leads: 45,  qualified: 12, converted: 4,  engagement: 4.5, enquiries: 18, status: 'Boosted', createdAt: new Date('2024-06-01').toISOString() },
+  { id: uid('post'), platform: 'Facebook',  campaign: 'Brand Awareness',  post: 'Testimonial Video',       leads: 38,  qualified: 10, converted: 3,  engagement: 4.2, enquiries: 15, status: 'Active',  createdAt: new Date('2024-06-05').toISOString() },
+  { id: uid('post'), platform: 'Instagram', campaign: 'Reel Campaign',    post: 'Reel - Product Demo',     leads: 32,  qualified: 8,  converted: 2,  engagement: 5.2, enquiries: 12, status: 'Boosted', createdAt: new Date('2024-06-03').toISOString() },
+  { id: uid('post'), platform: 'Instagram', campaign: 'Festival Promo',   post: 'Diwali Special Story',    leads: 28,  qualified: 7,  converted: 2,  engagement: 6.1, enquiries: 10, status: 'Active',  createdAt: new Date('2024-06-07').toISOString() },
+  { id: uid('post'), platform: 'YouTube',   campaign: 'Product Demo',     post: 'Full Demo Walkthrough',   leads: 40,  qualified: 15, converted: 6,  engagement: 2.1, enquiries: 20, status: 'Active',  createdAt: new Date('2024-06-02').toISOString() },
+  { id: uid('post'), platform: 'LinkedIn',  campaign: 'B2B Outreach',     post: 'Case Study Article',      leads: 60,  qualified: 25, converted: 8,  engagement: 3.8, enquiries: 22, status: 'Boosted', createdAt: new Date('2024-06-04').toISOString() },
+  { id: uid('post'), platform: 'WhatsApp',  campaign: 'Broadcast',        post: 'Promo Broadcast Message', leads: 150, qualified: 40, converted: 12, engagement: 12,  enquiries: 55, status: 'Active',  createdAt: new Date('2024-06-06').toISOString() },
 ];
 
 /* ═══════════════════════════════════════════════════════════════
    MAIN COMPONENT
    ═══════════════════════════════════════════════════════════════ */
 export default function SocialMedia() {
-  const { user: _user } = useAuth();
-
   const [posts, setPosts] = useState(() => loadState(SEED_POSTS));
   const [activeTab, setActiveTab] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
@@ -133,13 +169,18 @@ export default function SocialMedia() {
   const [platformOpen, setPlatformOpen] = useState(false);
   const [statusFilter, setStatusFilter] = useState('All');
   const [statusOpen, setStatusOpen] = useState(false);
-  const [viewMode, setViewMode] = useState('list');
   const [toast, setToast] = useState(null);
 
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState(null);
-  const [viewing, setViewing] = useState(null);
+  const [viewingId, setViewingId] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(null);
+
+  // Derived from live data so the drawer never shows stale info
+  const viewing = useMemo(
+    () => posts.find((p) => p.id === viewingId) || null,
+    [posts, viewingId]
+  );
 
   const toastTimerRef = useRef(null);
 
@@ -157,17 +198,20 @@ export default function SocialMedia() {
 
   /* ── TABS ── */
   const TABS = [
-    { key: 'all',             label: 'All Platforms',   icon: Share2 },
-    { key: 'Facebook',        label: 'Facebook',        icon: FacebookIcon },
-    { key: 'Instagram',       label: 'Instagram',       icon: InstagramIcon },
-    { key: 'YouTube',         label: 'YouTube',         icon: YoutubeIcon },
-    { key: 'LinkedIn',        label: 'LinkedIn',        icon: LinkedinIcon },
-    { key: 'WhatsApp',        label: 'WhatsApp',        icon: WhatsappIcon },
-    { key: 'social-leads',    label: 'Social Leads',    icon: Users },
+    { key: 'all',          label: 'All Platforms', icon: Share2 },
+    { key: 'Facebook',     label: 'Facebook',      icon: FacebookIcon },
+    { key: 'Instagram',    label: 'Instagram',     icon: InstagramIcon },
+    { key: 'YouTube',      label: 'YouTube',       icon: YoutubeIcon },
+    { key: 'LinkedIn',     label: 'LinkedIn',      icon: LinkedinIcon },
+    { key: 'WhatsApp',     label: 'WhatsApp',      icon: WhatsappIcon },
+    { key: 'social-leads', label: 'Social Leads',  icon: Users },
   ];
 
   const tabCounts = useMemo(() => {
-    const map = { all: posts.length, 'social-leads': posts.length };
+    const map = {
+      all: posts.length,
+      'social-leads': posts.filter((x) => (x.leads || 0) > 0).length,
+    };
     PLATFORMS.forEach((p) => {
       map[p] = posts.filter((x) => x.platform === p).length;
     });
@@ -178,7 +222,9 @@ export default function SocialMedia() {
   const filtered = useMemo(() => {
     let list = [...posts];
 
-    if (activeTab !== 'all' && activeTab !== 'social-leads') {
+    if (activeTab === 'social-leads') {
+      list = list.filter((p) => (p.leads || 0) > 0);
+    } else if (activeTab !== 'all') {
       list = list.filter((p) => p.platform === activeTab);
     }
     if (platformFilter !== 'All') list = list.filter((p) => p.platform === platformFilter);
@@ -187,7 +233,7 @@ export default function SocialMedia() {
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
       list = list.filter((p) =>
-        `${p.platform} ${p.campaign} ${p.post}`
+        `${p.platform} ${p.campaign} ${p.post} ${p.status}`
           .toLowerCase()
           .includes(q)
       );
@@ -198,10 +244,10 @@ export default function SocialMedia() {
 
   /* ── SUMMARY ── */
   const summary = useMemo(() => {
-    const totalLeads      = posts.reduce((s, p) => s + (p.leads || 0), 0);
-    const totalQualified  = posts.reduce((s, p) => s + (p.qualified || 0), 0);
-    const totalConverted  = posts.reduce((s, p) => s + (p.converted || 0), 0);
-    const avgEngagement   = posts.length > 0
+    const totalLeads     = posts.reduce((s, p) => s + (p.leads || 0), 0);
+    const totalQualified = posts.reduce((s, p) => s + (p.qualified || 0), 0);
+    const totalConverted = posts.reduce((s, p) => s + (p.converted || 0), 0);
+    const avgEngagement  = posts.length > 0
       ? (posts.reduce((s, p) => s + (p.engagement || 0), 0) / posts.length)
       : 0;
     return {
@@ -214,9 +260,9 @@ export default function SocialMedia() {
   const platformStats = useMemo(() => {
     return PLATFORMS.map((p) => {
       const list = posts.filter((x) => x.platform === p);
-      const leads     = list.reduce((s, x) => s + (x.leads || 0), 0);
-      const qualified = list.reduce((s, x) => s + (x.qualified || 0), 0);
-      const converted = list.reduce((s, x) => s + (x.converted || 0), 0);
+      const leads      = list.reduce((s, x) => s + (x.leads || 0), 0);
+      const qualified  = list.reduce((s, x) => s + (x.qualified || 0), 0);
+      const converted  = list.reduce((s, x) => s + (x.converted || 0), 0);
       const engagement = list.length > 0
         ? (list.reduce((s, x) => s + (x.engagement || 0), 0) / list.length)
         : 0;
@@ -246,7 +292,7 @@ export default function SocialMedia() {
   const handleDelete = (id) => {
     setPosts((prev) => prev.filter((p) => p.id !== id));
     setConfirmDelete(null);
-    if (viewing?.id === id) setViewing(null);
+    if (viewingId === id) setViewingId(null);
     showToast('Post deleted', 'error');
   };
 
@@ -264,8 +310,9 @@ export default function SocialMedia() {
   };
 
   const handleStatusChange = (id, newStatus) => {
+    const target = posts.find((p) => p.id === id);
+    if (target && target.status === newStatus) return;
     setPosts((prev) => prev.map((p) => (p.id === id ? { ...p, status: newStatus } : p)));
-    setViewing((v) => (v && v.id === id ? { ...v, status: newStatus } : v));
     showToast(`Status → ${newStatus}`);
   };
 
@@ -281,18 +328,12 @@ export default function SocialMedia() {
         p.platform, p.campaign, p.post, p.leads, p.engagement, p.enquiries, p.qualified, p.converted, p.status, p.createdAt,
       ]),
     ];
-    const csv = rows.map((r) => r.map((v) => `"${String(v ?? '').replace(/"/g, '""')}"`).join(',')).join('\n');
-    const blob = new Blob([csv], { type: 'text/csv' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `social-media-${Date.now()}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
+    downloadCsv(rows, `social-media-${Date.now()}.csv`);
     showToast(`Exported ${filtered.length} posts`);
   };
 
-  const hasFilters = Boolean(searchQuery) || platformFilter !== 'All' || statusFilter !== 'All' || (activeTab !== 'all' && activeTab !== 'social-leads');
+  const hasFilters =
+    Boolean(searchQuery) || platformFilter !== 'All' || statusFilter !== 'All' || activeTab !== 'all';
   const clearFilters = () => {
     setSearchQuery('');
     setPlatformFilter('All');
@@ -302,7 +343,7 @@ export default function SocialMedia() {
 
   const openCreate = () => { setEditing(null); setShowModal(true); };
   const openEdit = (post) => { setEditing(post); setShowModal(true); };
-  const openView = (post) => setViewing(post);
+  const openView = (post) => setViewingId(post.id);
 
   return (
     <div className="relative min-h-screen overflow-hidden bg-gradient-to-b from-[#FDF8FE] via-white to-[#FBF3FF]">
@@ -321,12 +362,12 @@ export default function SocialMedia() {
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            <button
+            {/* <button
               onClick={handleExport}
               className="group inline-flex items-center gap-2 rounded-full border border-brand-lilac bg-white px-4 py-2 text-xs font-semibold text-brand-ink shadow-sm transition-all hover:-translate-y-0.5 hover:border-brand-magenta/40 hover:shadow-md"
             >
               <Download size={14} className="transition-transform group-hover:translate-y-0.5" /> Export
-            </button>
+            </button> */}
             <button
               onClick={openCreate}
               className="group inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-brand-magenta to-brand-purple px-4 py-2 text-xs font-semibold text-white shadow-[0_6px_18px_-6px_rgba(227,28,121,0.6)] transition-all hover:-translate-y-0.5 hover:brightness-110"
@@ -347,11 +388,11 @@ export default function SocialMedia() {
           </div>
 
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-5">
-            <KpiCard icon={Share2}       label="Platforms"    value={PLATFORMS.length}         sub="Connected channels" color="purple"  delay={0} />
-            <KpiCard icon={Users}        label="Social Leads" value={summary.totalLeads}       sub="Across platforms"   color="emerald" delay={40} />
-            <KpiCard icon={CheckCircle2} label="Qualified"    value={summary.totalQualified}   sub="Ready to convert"   color="purple"  delay={80} />
-            <KpiCard icon={Target}       label="Converted"    value={summary.totalConverted}   sub="Won from social"    color="emerald" delay={120} />
-            <KpiCard icon={Heart}        label="Avg. Engagement" value={`${summary.avgEngagement.toFixed(1)}%`} sub="Across posts" color="rose" delay={160} />
+            <KpiCard icon={Share2}       label="Platforms"       value={PLATFORMS.length}       sub="Connected channels" color="purple"  delay={0} />
+            <KpiCard icon={Users}        label="Social Leads"    value={summary.totalLeads}     sub="Across platforms"   color="emerald" delay={40} />
+            <KpiCard icon={CheckCircle2} label="Qualified"       value={summary.totalQualified} sub="Ready to convert"   color="purple"  delay={80} />
+            <KpiCard icon={Target}       label="Converted"       value={summary.totalConverted} sub="Won from social"    color="emerald" delay={120} />
+            <KpiCard icon={Heart}        label="Avg. Engagement" value={summary.avgEngagement}  decimals={1} format={(n) => `${n.toFixed(1)}%`} sub="Across posts" color="rose" delay={160} />
           </div>
         </div>
 
@@ -372,7 +413,7 @@ export default function SocialMedia() {
               return (
                 <button
                   key={stat.platform}
-                  onClick={() => setActiveTab(stat.platform)}
+                  onClick={() => { setActiveTab(stat.platform); setPlatformFilter('All'); }}
                   style={{ animationDelay: `${i * 40}ms` }}
                   className={`group relative flex flex-col items-start gap-3 overflow-hidden rounded-2xl border-2 bg-gradient-to-br from-white via-white to-brand-mist/30 p-4 text-left shadow-[0_4px_16px_-8px_rgba(139,47,214,0.12)] transition-all duration-300 hover:-translate-y-1.5 animate-fade-slide-in ${theme.border} hover:shadow-[0_15px_40px_-15px_rgba(139,47,214,0.35)]`}
                 >
@@ -423,7 +464,10 @@ export default function SocialMedia() {
               return (
                 <button
                   key={t.key}
-                  onClick={() => setActiveTab(t.key)}
+                  onClick={() => {
+                    setActiveTab(t.key);
+                    if (t.key !== 'social-leads') setPlatformFilter('All');
+                  }}
                   className={`group inline-flex shrink-0 items-center gap-1.5 rounded-full px-3.5 py-2 text-xs font-semibold transition-all duration-200 ${
                     active
                       ? 'bg-gradient-to-r from-brand-magenta to-brand-purple text-white shadow-[0_4px_14px_-4px_rgba(227,28,121,0.5)] scale-[1.02]'
@@ -441,18 +485,6 @@ export default function SocialMedia() {
               );
             })}
 
-            <div className="ml-auto flex items-center gap-2">
-              <button
-                onClick={() => setViewMode('grid')}
-                className={`rounded-full border p-1.5 transition-all ${viewMode === 'grid' ? 'border-brand-magenta bg-brand-magenta/10 text-brand-magenta' : 'border-brand-lilac text-brand-ink/50 hover:bg-brand-lilac/30'}`}
-                title="Grid view"
-              ><Grid3x3 size={14} /></button>
-              <button
-                onClick={() => setViewMode('list')}
-                className={`rounded-full border p-1.5 transition-all ${viewMode === 'list' ? 'border-brand-magenta bg-brand-magenta/10 text-brand-magenta' : 'border-brand-lilac text-brand-ink/50 hover:bg-brand-lilac/30'}`}
-                title="List view"
-              ><List size={14} /></button>
-            </div>
           </div>
         </div>
 
@@ -463,11 +495,11 @@ export default function SocialMedia() {
             <input
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search by platform, campaign, post…"
+              placeholder="Search by platform, campaign, post, status…"
               className="w-full rounded-full border border-brand-lilac bg-white py-2.5 pl-11 pr-10 text-sm outline-none focus:border-brand-magenta focus:ring-2 focus:ring-brand-magenta/15"
             />
             {searchQuery && (
-              <button onClick={() => setSearchQuery('')} className="absolute right-3 top-1/2 -translate-y-1/2 rounded-full p-1 hover:bg-brand-lilac">
+              <button onClick={() => setSearchQuery('')} className="absolute right-3 top-1/2 -translate-y-1/2 rounded-full p-1 hover:bg-brand-lilac" aria-label="Clear search">
                 <X size={14} className="text-brand-ink/50" />
               </button>
             )}
@@ -478,7 +510,11 @@ export default function SocialMedia() {
             options={['All', ...PLATFORMS]}
             open={platformOpen}
             onToggle={() => { setPlatformOpen((s) => !s); setStatusOpen(false); }}
-            onChange={(v) => { setPlatformFilter(v); setPlatformOpen(false); }}
+            onChange={(v) => {
+              setPlatformFilter(v);
+              setPlatformOpen(false);
+              if (v !== 'All' && activeTab !== 'social-leads') setActiveTab('all');
+            }}
           />
 
           <DropdownFilter
@@ -506,109 +542,22 @@ export default function SocialMedia() {
 
         {/* CONTENT */}
         {filtered.length === 0 ? (
-          <EmptyState hasFilters={hasFilters} onClear={clearFilters} onCreate={openCreate} />
-        ) : viewMode === 'grid' ? (
-          <div className="grid grid-cols-1 gap-4 pb-40 md:grid-cols-2 xl:grid-cols-3">
+          <EmptyState
+            hasFilters={hasFilters}
+            onClear={clearFilters}
+            onCreate={openCreate}
+          />
+        ) : (
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
             {filtered.map((p) => (
               <PostCard
                 key={p.id}
                 post={p}
                 onView={() => openView(p)}
                 onEdit={() => openEdit(p)}
+                onDelete={() => setConfirmDelete(p)}
               />
             ))}
-          </div>
-        ) : (
-          /* ── PERFECT LIST VIEW ── */
-          <div className="card !p-0 overflow-hidden">
-            <table className="w-full table-fixed text-left text-sm">
-              <thead className="border-b border-brand-lilac/60 bg-brand-mist/40 text-[10px] font-bold uppercase tracking-wider text-brand-ink/60">
-                <tr>
-                  <th className="w-[16%] px-3 py-3">Platform</th>
-                  <th className="w-[18%] px-3 py-3">Campaign</th>
-                  <th className="w-[9%] px-3 py-3 text-right">Leads</th>
-                  <th className="w-[11%] px-3 py-3">Engagement</th>
-                  <th className="w-[10%] px-3 py-3 text-right">Enquiries</th>
-                  <th className="w-[10%] px-3 py-3 text-right">Qualified</th>
-                  <th className="w-[10%] px-3 py-3 text-right">Conversions</th>
-                  <th className="w-[16%] px-3 py-3 text-center">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-brand-lilac/40">
-                {filtered.map((p) => {
-                  const PlatformIcon = PLATFORM_ICONS[p.platform] || Globe;
-                  const theme = PLATFORM_THEMES[p.platform] || {};
-                  return (
-                    <tr key={p.id} className="transition-colors hover:bg-brand-mist/30">
-                      {/* Platform */}
-                      <td className="px-3 py-3">
-                        <div className="flex items-center gap-2">
-                          <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md border ${theme.bg} ${theme.fg} ${theme.border}`}>
-                            <PlatformIcon size={12} />
-                          </span>
-                          <div className="min-w-0">
-                            <button
-                              onClick={() => openView(p)}
-                              className="block truncate text-left text-xs font-semibold text-brand-ink hover:text-brand-magenta"
-                              title={p.platform}
-                            >
-                              {p.platform}
-                            </button>
-                            <p className="truncate font-mono text-[9px] text-brand-ink/50">
-                              {formatShortDate(p.createdAt)}
-                            </p>
-                          </div>
-                        </div>
-                      </td>
-
-                      {/* Campaign */}
-                      <td className="px-3 py-3">
-                        <p className="truncate text-xs text-brand-ink/70" title={p.campaign}>{p.campaign}</p>
-                      </td>
-
-                      {/* Leads */}
-                      <td className="px-3 py-3 text-right text-xs font-semibold tabular-nums">{p.leads}</td>
-
-                      {/* Engagement */}
-                      <td className="px-3 py-3">
-                        <span className="inline-flex items-center gap-1 text-xs text-emerald-600">
-                          <Heart size={10} /> {p.engagement}%
-                        </span>
-                      </td>
-
-                      {/* Enquiries */}
-                      <td className="px-3 py-3 text-right text-xs tabular-nums">{p.enquiries}</td>
-
-                      {/* Qualified */}
-                      <td className="px-3 py-3 text-right text-xs tabular-nums text-brand-purple font-medium">{p.qualified}</td>
-
-                      {/* Conversions */}
-                      <td className="px-3 py-3 text-right text-xs tabular-nums text-emerald-600 font-medium">{p.converted}</td>
-
-                      {/* Actions - Centered */}
-                      <td className="px-3 py-3">
-                        <div className="flex items-center justify-center gap-2">
-                          <button
-                            onClick={() => openView(p)}
-                            className="flex h-7 items-center gap-1 rounded-lg border border-brand-lilac bg-white px-2 text-[10px] font-semibold text-brand-ink transition-all hover:border-brand-magenta/40 hover:bg-brand-magenta/5 hover:text-brand-magenta"
-                            title="View details"
-                          >
-                            <Eye size={11} /> View
-                          </button>
-                          <button
-                            onClick={() => openEdit(p)}
-                            className="flex h-7 items-center gap-1 rounded-lg bg-gradient-to-r from-brand-magenta to-brand-purple px-2 text-[10px] font-semibold text-white shadow-card transition-all hover:brightness-110"
-                            title="Edit post"
-                          >
-                            <Pencil size={10} /> Edit
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
           </div>
         )}
 
@@ -625,12 +574,12 @@ export default function SocialMedia() {
         {viewing && (
           <PostDetailDrawer
             post={viewing}
-            onClose={() => setViewing(null)}
-            onEdit={() => { const p = viewing; setViewing(null); openEdit(p); }}
-            onDuplicate={() => { handleDuplicate(viewing); setViewing(null); }}
+            onClose={() => setViewingId(null)}
+            onEdit={() => { const p = viewing; setViewingId(null); openEdit(p); }}
+            onDuplicate={() => { handleDuplicate(viewing); setViewingId(null); }}
             onStatusChange={(s) => handleStatusChange(viewing.id, s)}
             onConnect={handleConnect}
-            onDelete={() => { const p = viewing; setViewing(null); setConfirmDelete(p); }}
+            onDelete={() => { const p = viewing; setViewingId(null); setConfirmDelete(p); }}
           />
         )}
 
@@ -653,10 +602,9 @@ export default function SocialMedia() {
 /* ═══════════════════════════════════════════════════════════════
    KPI CARD
    ═══════════════════════════════════════════════════════════════ */
-function KpiCard({ icon: Icon, label, value, sub, color = 'purple', delay = 0 }) {
-  const numeric = typeof value === 'number';
-  const displayValue = useAnimatedCount(numeric ? value : 0);
-  const showValue = numeric ? displayValue : value;
+function KpiCard({ icon: Icon, label, value, sub, color = 'purple', delay = 0, format, decimals = 0 }) {
+  const animated = useAnimatedCount(Number(value) || 0, 600, decimals);
+  const showValue = format ? format(animated) : animated.toLocaleString('en-IN');
 
   const themes = {
     purple:  { border: 'border-violet-200 hover:border-violet-400', bg: 'from-violet-50 via-violet-50/30 to-white', iconBg: 'bg-violet-100 text-brand-purple border-violet-200', bar: 'from-brand-purple to-brand-magenta', glow: 'bg-brand-purple/25', shadow: 'hover:shadow-[0_15px_40px_-15px_rgba(139,47,214,0.45)]', valueColor: 'text-brand-purple' },
@@ -690,38 +638,54 @@ function KpiCard({ icon: Icon, label, value, sub, color = 'purple', delay = 0 })
   );
 }
 
-function useAnimatedCount(target, duration = 600) {
+/* Animates from the previous value (not from 0) and supports decimals */
+function useAnimatedCount(target, duration = 600, decimals = 0) {
   const [display, setDisplay] = useState(0);
-  const startRef = useRef(null);
+  const fromRef = useRef(0);
   const rafRef = useRef(null);
 
   useEffect(() => {
-    const to = Number(target) || 0;
-    if (to <= 0) { setDisplay(0); return undefined; }
-    startRef.current = null;
+    const to = Number.isFinite(Number(target)) ? Number(target) : 0;
+    const from = fromRef.current;
+    const factor = 10 ** decimals;
+    let start = null;
     const tick = (now) => {
-      if (startRef.current === null) startRef.current = now;
-      const elapsed = now - startRef.current;
-      const progress = Math.min(elapsed / duration, 1);
+      if (start === null) start = now;
+      const progress = Math.min((now - start) / duration, 1);
       const eased = 1 - Math.pow(1 - progress, 3);
-      setDisplay(Math.round(to * eased));
+      const val = Math.round((from + (to - from) * eased) * factor) / factor;
+      fromRef.current = val;
+      setDisplay(val);
       if (progress < 1) rafRef.current = requestAnimationFrame(tick);
     };
     rafRef.current = requestAnimationFrame(tick);
     return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); };
-  }, [target, duration]);
+  }, [target, duration, decimals]);
 
-  return display.toLocaleString('en-IN');
+  return display;
 }
 
 /* ═══════════════════════════════════════════════════════════════
    DROPDOWN FILTER
    ═══════════════════════════════════════════════════════════════ */
 function DropdownFilter({ label, icon: Icon, value, options, open, onToggle, onChange }) {
+  const triggerRef = useRef(null);
+  const [openUp, setOpenUp] = useState(false);
+
+  const handleToggle = () => {
+    if (!open) {
+      const rect = triggerRef.current?.getBoundingClientRect();
+      if (rect) setOpenUp(window.innerHeight - rect.bottom < 320);
+    }
+    onToggle();
+  };
+
   return (
     <div className="relative">
       <button
-        onClick={onToggle}
+        ref={triggerRef}
+        onClick={handleToggle}
+        aria-expanded={open}
         className="inline-flex items-center gap-2 rounded-full border border-brand-lilac bg-white px-4 py-2.5 text-sm font-medium text-brand-ink hover:bg-brand-lilac/40"
       >
         {Icon && <Icon size={14} className="text-brand-magenta" />}
@@ -731,7 +695,7 @@ function DropdownFilter({ label, icon: Icon, value, options, open, onToggle, onC
       {open && (
         <>
           <div className="fixed inset-0 z-10" onClick={onToggle} />
-          <div className="absolute right-0 top-full z-30 mt-2 max-h-72 w-56 overflow-y-auto no-scrollbar rounded-xl border border-brand-lilac bg-white p-1 shadow-panel">
+          <div className={`absolute right-0 ${openUp ? 'bottom-full mb-2' : 'top-full mt-2'} z-30 max-h-72 w-56 overflow-y-auto no-scrollbar rounded-xl border border-brand-lilac bg-white p-1 shadow-panel`}>
             {options.map((o) => (
               <button
                 key={o}
@@ -753,9 +717,52 @@ function DropdownFilter({ label, icon: Icon, value, options, open, onToggle, onC
 }
 
 /* ═══════════════════════════════════════════════════════════════
+   ROW ACTIONS (table) — View · Edit · Duplicate · Delete
+   ═══════════════════════════════════════════════════════════════ */
+function RowActions({ onView, onEdit, onDuplicate, onDelete }) {
+  const base = 'inline-flex h-7 w-7 items-center justify-center rounded-lg border transition-all';
+  return (
+    <div className="flex items-center justify-center gap-1">
+      <button
+        onClick={onView}
+        title="View details"
+        aria-label="View details"
+        className={`${base} border-brand-lilac bg-white text-brand-ink hover:border-brand-magenta/40 hover:bg-brand-magenta/5 hover:text-brand-magenta`}
+      >
+        <Eye size={12} />
+      </button>
+      <button
+        onClick={onEdit}
+        title="Edit post"
+        aria-label="Edit post"
+        className={`${base} border-transparent bg-gradient-to-r from-brand-magenta to-brand-purple text-white shadow-card hover:brightness-110`}
+      >
+        <Pencil size={12} />
+      </button>
+      <button
+        onClick={onDuplicate}
+        title="Duplicate post"
+        aria-label="Duplicate post"
+        className={`${base} border-brand-lilac bg-white text-brand-ink hover:border-brand-magenta/40 hover:bg-brand-magenta/5 hover:text-brand-magenta`}
+      >
+        <Copy size={12} />
+      </button>
+      <button
+        onClick={onDelete}
+        title="Delete post"
+        aria-label="Delete post"
+        className={`${base} border-rose-200 bg-rose-50 text-rose-500 hover:bg-rose-100`}
+      >
+        <Trash2 size={12} />
+      </button>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════
    POST CARD (GRID)
    ═══════════════════════════════════════════════════════════════ */
-function PostCard({ post: p, onView, onEdit }) {
+function PostCard({ post: p, onView, onEdit, onDelete }) {
   const st = STATUS_STYLES[p.status] || STATUS_STYLES.Active;
   const StatusIcon = st.icon;
   const PlatformIcon = PLATFORM_ICONS[p.platform] || Globe;
@@ -791,7 +798,7 @@ function PostCard({ post: p, onView, onEdit }) {
           <div className="grid grid-cols-[auto_1fr_auto] items-center gap-2">
             <Megaphone size={11} className="shrink-0 text-brand-ink/50" />
             <span className="truncate text-brand-ink/50">Campaign</span>
-            <span className="truncate text-right font-semibold text-brand-ink">{p.campaign}</span>
+            <span className="truncate text-right font-semibold text-brand-ink">{p.campaign || '—'}</span>
           </div>
           <div className="grid grid-cols-[auto_1fr_auto] items-center gap-2">
             <Heart size={11} className="shrink-0 text-brand-ink/50" />
@@ -820,7 +827,7 @@ function PostCard({ post: p, onView, onEdit }) {
           <ProgressBar label="Conversion Rate" value={conversionRate} tone="emerald" />
         </div>
 
-        <div className="mt-4 grid grid-cols-2 gap-2">
+        <div className="mt-4 grid grid-cols-3 gap-2">
           <button
             onClick={onView}
             className="flex min-w-0 items-center justify-center gap-1.5 rounded-xl border border-brand-lilac bg-white px-2 py-2 text-xs font-semibold text-brand-ink transition-all hover:border-brand-magenta/40 hover:bg-brand-magenta/5 hover:text-brand-magenta"
@@ -834,6 +841,13 @@ function PostCard({ post: p, onView, onEdit }) {
           >
             <Pencil size={12} className="shrink-0" />
             <span className="truncate">Edit</span>
+          </button>
+          <button
+            onClick={onDelete}
+            className="flex min-w-0 items-center justify-center gap-1.5 rounded-xl border border-rose-200 bg-rose-50 px-2 py-2 text-xs font-semibold text-rose-500 transition-all hover:bg-rose-100"
+          >
+            <Trash2 size={12} className="shrink-0" />
+            <span className="truncate">Delete</span>
           </button>
         </div>
       </div>
@@ -906,12 +920,23 @@ function PostModal({ mode = 'create', initial = null, onClose, onSubmit }) {
   const submitTimerRef = useRef(null);
 
   useEffect(() => { postRef.current?.focus(); }, []);
+  useEscape(true, () => { if (!submitting) onClose(); });
   useEffect(() => () => { if (submitTimerRef.current) clearTimeout(submitTimerRef.current); }, []);
 
   const validate = () => {
     if (!form.post.trim()) return 'Post/content title is required.';
     if (!form.campaign.trim()) return 'Campaign is required.';
-    if (Number(form.engagement) < 0 || Number(form.engagement) > 100) return 'Engagement must be between 0 and 100.';
+
+    const leads = Number(form.leads) || 0;
+    const qualified = Number(form.qualified) || 0;
+    const converted = Number(form.converted) || 0;
+    const enquiries = Number(form.enquiries) || 0;
+    const engagement = Number(form.engagement) || 0;
+
+    if (leads < 0 || qualified < 0 || converted < 0 || enquiries < 0) return 'Numbers cannot be negative.';
+    if (qualified > leads) return 'Qualified cannot be more than total leads.';
+    if (converted > leads) return 'Conversions cannot be more than total leads.';
+    if (engagement < 0 || engagement > 100) return 'Engagement must be between 0 and 100.';
     return null;
   };
 
@@ -926,6 +951,8 @@ function PostModal({ mode = 'create', initial = null, onClose, onSubmit }) {
       setSubmitting(false);
       onSubmit({
         ...form,
+        post: form.post.trim(),
+        campaign: form.campaign.trim(),
         leads: Number(form.leads) || 0,
         qualified: Number(form.qualified) || 0,
         converted: Number(form.converted) || 0,
@@ -936,7 +963,12 @@ function PostModal({ mode = 'create', initial = null, onClose, onSubmit }) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4 backdrop-blur-sm">
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={isEdit ? 'Edit Post' : 'Add New Post'}
+      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4 backdrop-blur-sm"
+    >
       <div className="my-8 w-full max-w-3xl rounded-2xl bg-white shadow-panel">
         <div className="flex items-center justify-between gap-3 border-b border-brand-lilac/60 px-6 py-4">
           <div className="flex items-center gap-3">
@@ -952,12 +984,12 @@ function PostModal({ mode = 'create', initial = null, onClose, onSubmit }) {
               </p>
             </div>
           </div>
-          <button onClick={onClose} className="rounded-lg p-2 text-brand-ink/50 hover:bg-brand-lilac">
+          <button onClick={onClose} className="rounded-lg p-2 text-brand-ink/50 hover:bg-brand-lilac" aria-label="Close">
             <X size={18} />
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="max-h-[75vh] space-y-5 overflow-y-auto p-6">
+        <form onSubmit={handleSubmit} noValidate className="max-h-[75vh] space-y-5 overflow-y-auto p-6">
           <SectionTitle icon={Globe} label="Platform & Campaign" />
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <div>
@@ -991,11 +1023,11 @@ function PostModal({ mode = 'create', initial = null, onClose, onSubmit }) {
 
           <SectionTitle icon={BarChart3} label="Performance Metrics" />
           <div className="grid grid-cols-2 gap-4 md:grid-cols-3">
-            <ModalInput label="Leads Generated" type="number" value={form.leads} onChange={(v) => setForm({ ...form, leads: v })} placeholder="0" icon={Users} />
-            <ModalInput label="Qualified Leads" type="number" value={form.qualified} onChange={(v) => setForm({ ...form, qualified: v })} placeholder="0" icon={CheckCircle2} />
-            <ModalInput label="Conversions" type="number" value={form.converted} onChange={(v) => setForm({ ...form, converted: v })} placeholder="0" icon={Target} />
-            <ModalInput label="Enquiries" type="number" value={form.enquiries} onChange={(v) => setForm({ ...form, enquiries: v })} placeholder="0" icon={MessageSquare} />
-            <ModalInput label="Engagement (%)" type="number" value={form.engagement} onChange={(v) => setForm({ ...form, engagement: v })} placeholder="0" icon={Heart} />
+            <ModalInput label="Leads Generated" type="number" min={0} step={1} value={form.leads} onChange={(v) => { setForm({ ...form, leads: v }); setError(''); }} placeholder="0" icon={Users} />
+            <ModalInput label="Qualified Leads" type="number" min={0} step={1} value={form.qualified} onChange={(v) => { setForm({ ...form, qualified: v }); setError(''); }} placeholder="0" icon={CheckCircle2} />
+            <ModalInput label="Conversions" type="number" min={0} step={1} value={form.converted} onChange={(v) => { setForm({ ...form, converted: v }); setError(''); }} placeholder="0" icon={Target} />
+            <ModalInput label="Enquiries" type="number" min={0} step={1} value={form.enquiries} onChange={(v) => setForm({ ...form, enquiries: v })} placeholder="0" icon={MessageSquare} />
+            <ModalInput label="Engagement (%)" type="number" min={0} max={100} step="0.1" value={form.engagement} onChange={(v) => { setForm({ ...form, engagement: v }); setError(''); }} placeholder="0" icon={Heart} />
           </div>
 
           <SectionTitle icon={Zap} label="Status" />
@@ -1056,7 +1088,7 @@ function SectionTitle({ icon: Icon, label }) {
   );
 }
 
-function ModalInput({ label, type = 'text', value, onChange, placeholder, icon: Icon, required, inputRef }) {
+function ModalInput({ label, type = 'text', value, onChange, placeholder, icon: Icon, required, inputRef, min, max, step }) {
   return (
     <div>
       <label className="mb-1.5 block text-xs font-semibold text-brand-ink/70">{label}</label>
@@ -1067,6 +1099,9 @@ function ModalInput({ label, type = 'text', value, onChange, placeholder, icon: 
           type={type}
           value={value}
           required={required}
+          min={min}
+          max={max}
+          step={step}
           onChange={(e) => onChange(e.target.value)}
           placeholder={placeholder}
           className={`w-full rounded-xl border border-brand-lilac bg-white py-2.5 ${Icon ? 'pl-10' : 'pl-3.5'} pr-3.5 text-sm outline-none focus:border-brand-magenta focus:ring-2 focus:ring-brand-magenta/15`}
@@ -1087,8 +1122,15 @@ function PostDetailDrawer({ post: p, onClose, onEdit, onDuplicate, onStatusChang
   const conversionRate = p.leads ? Math.round((p.converted / p.leads) * 100) : 0;
   const qualifiedRate  = p.leads ? Math.round((p.qualified / p.leads) * 100) : 0;
 
+  useEscape(true, onClose);
+
   return (
-    <div className="fixed inset-0 z-50 flex justify-end bg-black/40 backdrop-blur-sm">
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Post details"
+      className="fixed inset-0 z-50 flex justify-end bg-black/40 backdrop-blur-sm"
+    >
       <div className="h-full w-full max-w-2xl overflow-y-auto bg-white shadow-panel animate-slide-in-right">
         <div className="sticky top-0 z-10 flex items-center justify-between gap-3 border-b border-brand-lilac bg-gradient-to-r from-brand-mist/60 to-white px-6 py-4 backdrop-blur-sm">
           <div className="flex items-center gap-3">
@@ -1100,7 +1142,7 @@ function PostDetailDrawer({ post: p, onClose, onEdit, onDuplicate, onStatusChang
               <h3 className="font-display text-base font-bold text-brand-ink">{p.post}</h3>
             </div>
           </div>
-          <button onClick={onClose} className="rounded-lg p-2 text-brand-ink/50 hover:bg-brand-lilac">
+          <button onClick={onClose} className="rounded-lg p-2 text-brand-ink/50 hover:bg-brand-lilac" aria-label="Close">
             <X size={18} />
           </button>
         </div>
@@ -1121,9 +1163,9 @@ function PostDetailDrawer({ post: p, onClose, onEdit, onDuplicate, onStatusChang
           </div>
 
           <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-            <DetailStat icon={Users}        label="Total Leads" value={p.leads}     color="rose" />
-            <DetailStat icon={CheckCircle2} label="Qualified"   value={p.qualified} color="purple" />
-            <DetailStat icon={Target}       label="Converted"   value={p.converted} color="emerald" />
+            <DetailStat icon={Users}        label="Total Leads" value={p.leads}            color="rose" />
+            <DetailStat icon={CheckCircle2} label="Qualified"   value={p.qualified}        color="purple" />
+            <DetailStat icon={Target}       label="Converted"   value={p.converted}        color="emerald" />
             <DetailStat icon={Heart}        label="Engagement"  value={`${p.engagement}%`} color="amber" />
           </div>
 
@@ -1131,7 +1173,7 @@ function PostDetailDrawer({ post: p, onClose, onEdit, onDuplicate, onStatusChang
             <SectionTitle icon={Activity} label="Post Information" />
             <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
               <InfoRow icon={Globe}         label="Platform"     value={p.platform} />
-              <InfoRow icon={Megaphone}     label="Campaign"     value={p.campaign} />
+              <InfoRow icon={Megaphone}     label="Campaign"     value={p.campaign || '—'} />
               <InfoRow icon={MessageSquare} label="Post/Content" value={p.post} />
               <InfoRow icon={MessageSquare} label="Enquiries"    value={p.enquiries} />
               <InfoRow icon={Calendar}      label="Published"    value={formatDate(p.createdAt)} />
@@ -1157,10 +1199,11 @@ function PostDetailDrawer({ post: p, onClose, onEdit, onDuplicate, onStatusChang
                 return (
                   <button
                     key={stt}
-                    onClick={() => onStatusChange(stt)}
+                    onClick={() => { if (!active) onStatusChange(stt); }}
+                    disabled={active}
                     className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold transition-all ${
                       active
-                        ? `${cs.chip} ring-2 ring-brand-magenta/20`
+                        ? `${cs.chip} ring-2 ring-brand-magenta/20 cursor-default`
                         : 'border-brand-lilac bg-white text-brand-ink/60 hover:bg-brand-lilac/30'
                     }`}
                   >
@@ -1294,8 +1337,14 @@ function EmptyState({ hasFilters, onClear, onCreate }) {
 }
 
 function ConfirmDialog({ title, message, confirmLabel, onCancel, onConfirm }) {
+  useEscape(true, onCancel);
   return (
-    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm">
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={title}
+      className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm"
+    >
       <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-panel">
         <div className="mb-4 flex items-center gap-3">
           <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-rose-100 text-rose-500">
@@ -1319,7 +1368,7 @@ function ConfirmDialog({ title, message, confirmLabel, onCancel, onConfirm }) {
 
 function Toast({ message, type }) {
   return (
-    <div className="fixed bottom-6 left-1/2 z-[100] -translate-x-1/2">
+    <div role="status" aria-live="polite" className="fixed bottom-6 left-1/2 z-[100] -translate-x-1/2">
       <div className={`flex items-center gap-2 rounded-xl border px-4 py-3 text-sm font-semibold shadow-panel ${
         type === 'error' ? 'border-rose-200 bg-rose-50 text-rose-600' : 'border-emerald-200 bg-emerald-50 text-emerald-600'
       }`}>

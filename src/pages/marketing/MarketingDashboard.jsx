@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import {
   Megaphone, Target, Users, TrendingUp, Award, ArrowRight,
   BarChart3, Sparkles, CheckCircle2, Building2, Layers,
-  Calendar, RefreshCw, Download, Share2, Globe,
+  Calendar, RefreshCw, Share2, Globe,
   XCircle, AlertTriangle, UserPlus, ListChecks,
   Zap, DollarSign, Percent, Clock, FileText,
 } from 'lucide-react';
@@ -179,35 +179,6 @@ export default function MarketingDashboard() {
     setTimeout(() => setRefreshed(false), 1200);
   };
 
-  const handleExport = () => {
-    const rows = [
-      ['Marketing Executive Dashboard Report', ''],
-      ['Project', activeWebsite?.name || ''],
-      ['Total Campaigns', metrics.totalCampaigns],
-      ['Active Campaigns', metrics.activeCampaigns],
-      ['Total Marketing Leads', metrics.totalLeads],
-      ["Today's Leads", metrics.todaysLeads],
-      ['Pending Leads', metrics.pendingLeads],
-      ['Qualified Leads', metrics.qualifiedLeads],
-      ['Converted Leads', metrics.convertedLeads],
-      ['Lost Leads', metrics.lostLeads],
-      ['Total Ad Spend', `$${metrics.totalAdSpend.toLocaleString()}`],
-      ['Cost Per Lead', `$${metrics.costPerLead.toFixed(2)}`],
-      ['Conversion Rate', `${metrics.conversionRate}%`],
-      ['Pending Follow-ups', metrics.pendingFollowUps],
-    ];
-    const csv = rows
-      .map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(','))
-      .join('\n');
-    const blob = new Blob([csv], { type: 'text/csv' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `marketing-report-${Date.now()}.csv`;
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(url), 100);
-  };
-
   return (
     <div className="relative min-h-screen overflow-hidden bg-gradient-to-br from-[#FBE9F3] via-[#FDF6FB] to-[#EDE1FB]">
       {/* Ambient color anchors */}
@@ -252,14 +223,6 @@ export default function MarketingDashboard() {
               title="Refresh"
             >
               <RefreshCw size={15} />
-            </button>
-
-            <button
-              onClick={handleExport}
-              className="group inline-flex items-center gap-2 rounded-full border border-brand-lilac bg-white px-4 py-2 text-xs font-semibold text-brand-ink shadow-sm transition-all hover:-translate-y-0.5 hover:border-brand-magenta/40 hover:bg-brand-magenta/[0.03] hover:shadow-md"
-            >
-              <Download size={14} className="transition-transform group-hover:translate-y-0.5" />
-              Export
             </button>
           </div>
         </div>
@@ -707,7 +670,6 @@ export default function MarketingDashboard() {
               { label: 'Add Lead Source',    icon: Share2,     to: ROUTES.sources,     tone: 'emerald' },
               { label: 'Schedule Task',      icon: Calendar,   to: ROUTES.tasks,       tone: 'amber' },
               { label: 'Campaign Report',    icon: FileText,   to: ROUTES.reports,     tone: 'purple' },
-              { label: 'Export Report',      icon: Download,   to: ROUTES.reports,     tone: 'emerald' },
             ].map(({ label, icon: Icon, to, tone }, idx) => (
               <QuickAction key={label} label={label} icon={Icon} to={to} tone={tone} delay={idx * 40} />
             ))}

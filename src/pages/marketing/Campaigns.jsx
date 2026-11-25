@@ -2,15 +2,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Megaphone, Plus, Play, Pause, X, Search, Filter, ChevronDown,
-  Eye, Pencil, Trash2, BarChart3, TrendingUp,
-  TrendingDown, Users, Layers, Target, PhoneCall, Headphones,
-  Percent, Check, AlertCircle, CheckCircle2, Download, Calendar,
-  Clock, Repeat, Timer, Info, Save, Star, Award, Zap, ArrowRight,
-  PhoneOff, MessageSquare, Copy, Briefcase, Hash, Sparkles, Radio,
-  ListChecks, PhoneOutgoing, PhoneIncoming, PhoneMissed, Circle,
-  XCircle, ClipboardList, UserPlus, RefreshCw, Grid3x3, List,
-  CheckSquare, Flag, Activity, Globe, DollarSign,
-  Inbox, CircleDot, Flame, User,
+  Eye, Pencil, Trash2, BarChart3, TrendingUp, Users, Layers, Target,
+  Check, AlertCircle, CheckCircle2, Download, Calendar, Clock, Info,
+  Star, Zap, PhoneOff, Briefcase, Sparkles, XCircle, Grid3x3, List,
+  Activity, Globe, DollarSign, Inbox, CircleDot, User,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 
@@ -56,6 +51,19 @@ const csvCell = (v) => {
   return `"${s.replace(/"/g, '""')}"`;
 };
 
+const downloadCsv = (rows, filename) => {
+  const csv = rows.map((r) => r.map(csvCell).join(',')).join('\n');
+  const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+};
+
 const loadState = (fallback) => {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -83,21 +91,30 @@ const saveState = (value) => {
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(value)); } catch { /* ignore */ }
 };
 
+const parseLocal = (val) => {
+  if (!val) return null;
+  const d = /^\d{4}-\d{2}-\d{2}$/.test(val) ? new Date(`${val}T00:00:00`) : new Date(val);
+  return isNaN(d.getTime()) ? null : d;
+};
+
 const formatDate = (val) => {
-  if (!val) return '—';
-  const d = new Date(val);
-  if (isNaN(d.getTime())) return '—';
-  return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+  const d = parseLocal(val);
+  return d ? d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
 };
 
 const formatShortDate = (val) => {
-  if (!val) return '—';
-  const d = new Date(val);
-  if (isNaN(d.getTime())) return '—';
-  return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' });
+  const d = parseLocal(val);
+  return d ? d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) : '—';
+};
+
+const todayLocal = () => {
+  const d = new Date();
+  d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+  return d.toISOString().slice(0, 10);
 };
 
 const formatCurrency = (n) => `$${Number(n || 0).toLocaleString('en-US')}`;
+const formatCpl = (n) => (n ? `$${Number(n).toFixed(2)}` : '—');
 
 /* ═══════════════════════════════════════════════════════════════
    SEED DATA
@@ -182,19 +199,21 @@ const HEALTH_TONES = {
 
 /* Escape-key hook */
 function useEscape(enabled, handler) {
+  const handlerRef = useRef(handler);
+  useEffect(() => { handlerRef.current = handler; });
   useEffect(() => {
     if (!enabled) return undefined;
-    const onKey = (e) => { if (e.key === 'Escape') handler(); };
+    const onKey = (e) => { if (e.key === 'Escape') handlerRef.current(); };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [enabled, handler]);
+  }, [enabled]);
 }
 
 /* ═══════════════════════════════════════════════════════════════
    MAIN COMPONENT
    ═══════════════════════════════════════════════════════════════ */
 export default function Campaigns() {
-  const { user } = useAuth();
+  const { user } = useAuth() || {};
 
   const [campaigns, setCampaigns] = useState(() => loadState(SEED_CAMPAIGNS));
   const [searchQuery, setSearchQuery] = useState('');
@@ -207,15 +226,20 @@ export default function Campaigns() {
 
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState(null);
-  const [viewing, setViewing] = useState(null);
-  const [monitoring, setMonitoring] = useState(null);
+  const [viewingId, setViewingId] = useState(null);
+  const [monitoringId, setMonitoringId] = useState(null);
+  const viewing = useMemo(() => campaigns.find((c) => c.id === viewingId) || null, [campaigns, viewingId]);
+  const monitoring = useMemo(() => campaigns.find((c) => c.id === monitoringId) || null, [campaigns, monitoringId]);
   const [confirmDelete, setConfirmDelete] = useState(null);
 
   useEffect(() => { saveState(campaigns); }, [campaigns]);
 
+  const toastTimer = useRef(null);
+  useEffect(() => () => clearTimeout(toastTimer.current), []);
   const showToast = (msg, type = 'success') => {
+    clearTimeout(toastTimer.current);
     setToast({ msg, type });
-    setTimeout(() => setToast(null), 2400);
+    toastTimer.current = setTimeout(() => setToast(null), 2400);
   };
 
   const filtered = useMemo(() => {
@@ -225,7 +249,7 @@ export default function Campaigns() {
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
       list = list.filter((c) =>
-        `${c.name} ${c.channel} ${c.assignedTo} ${c.project} ${c.objective || ''}`
+        `${c.name} ${c.type} ${c.channel} ${c.assignedTo} ${c.project} ${c.audience || ''} ${c.objective || ''}`
           .toLowerCase()
           .includes(q)
       );
@@ -267,10 +291,18 @@ export default function Campaigns() {
   };
 
   const handleEdit = (id, updates) => {
-    setCampaigns((prev) => prev.map((c) => (c.id === id ? { ...c, ...updates } : c)));
-    setEditing(null);
-    showToast('Campaign updated');
-  };
+  setCampaigns((prev) =>
+    prev.map((c) => {
+      if (c.id !== id) return c;
+      // Completed campaigns can't be reopened via the edit form
+      const status = c.status === 'Completed' ? 'Completed' : updates.status;
+      return { ...c, ...updates, status };
+    })
+  );
+  setShowModal(false);
+  setEditing(null);
+  showToast('Campaign updated');
+};
 
   const handleDelete = (id) => {
     setCampaigns((prev) => prev.filter((c) => c.id !== id));
@@ -301,8 +333,8 @@ export default function Campaigns() {
   };
 
   const handleToggle = (id, currentStatus) => {
-    if (currentStatus === 'Completed') {
-      showToast('Completed campaigns cannot be restarted.', 'error');
+    if (currentStatus === 'Completed' || currentStatus === 'Cancelled') {
+      showToast(`${currentStatus} campaigns cannot be restarted. Duplicate it instead.`, 'error');
       return;
     }
     const newStatus = currentStatus === 'Active' ? 'Paused' : 'Active';
@@ -319,23 +351,16 @@ export default function Campaigns() {
         c.budget, c.leads, c.qualified, c.converted, c.startDate, c.endDate, c.assignedTo,
       ]),
     ];
-    const csv = rows.map((r) => r.map(csvCell).join(',')).join('\n');
-    const blob = new Blob([csv], { type: 'text/csv' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `marketing-campaigns-${Date.now()}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
+    downloadCsv(rows, `marketing-campaigns-${Date.now()}.csv`);
     showToast(`Exported ${filtered.length} campaigns`);
   };
 
   const hasFilters = searchQuery || statusFilter !== 'All' || typeFilter !== 'All';
   const clearFilters = () => { setSearchQuery(''); setStatusFilter('All'); setTypeFilter('All'); };
 
-  const openView = (c) => setViewing(c);
+  const openView = (c) => setViewingId(c.id);
   const openEdit = (c) => { setEditing(c); setShowModal(true); };
-  const openMonitor = (c) => setMonitoring(c);
+  const openMonitor = (c) => setMonitoringId(c.id);
   const openDelete = (c) => setConfirmDelete(c);
 
   return (
@@ -343,7 +368,7 @@ export default function Campaigns() {
       <div className="pointer-events-none absolute -top-32 -right-32 h-96 w-96 rounded-full bg-brand-magenta/[0.05] blur-3xl" />
       <div className="pointer-events-none absolute top-1/2 -left-32 h-80 w-80 rounded-full bg-brand-purple/[0.05] blur-3xl" />
 
-      <div className="relative space-y-5 px-1 py-1 pb-40">
+      <div className="relative space-y-5 px-1 py-1 pb-16">
         {/* HEADER */}
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
@@ -355,12 +380,12 @@ export default function Campaigns() {
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            <button
+            {/* <button
               onClick={handleExport}
               className="group inline-flex items-center gap-2 rounded-full border border-brand-lilac bg-white px-4 py-2 text-xs font-semibold text-brand-ink shadow-sm transition-all hover:-translate-y-0.5 hover:border-brand-magenta/40 hover:shadow-md"
             >
               <Download size={14} className="transition-transform group-hover:translate-y-0.5" /> Export
-            </button>
+            </button> */}
             <button
               onClick={() => { setEditing(null); setShowModal(true); }}
               className="group inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-brand-magenta to-brand-purple px-4 py-2 text-xs font-semibold text-white shadow-[0_6px_18px_-6px_rgba(227,28,121,0.6)] transition-all hover:-translate-y-0.5 hover:brightness-110"
@@ -384,7 +409,7 @@ export default function Campaigns() {
             <KpiCard icon={Megaphone}  label="Total Campaigns" value={summary.total}          sub={`${summary.active} active · ${summary.paused} paused`} color="purple"  delay={0} />
             <KpiCard icon={Users}      label="Total Leads"     value={summary.totalLeads}     sub={`${summary.totalQualified} qualified`}                color="emerald" delay={40} />
             <KpiCard icon={Target}     label="Converted"       value={summary.totalConverted} sub={`${summary.conversion}% conversion rate`}             color="amber"   delay={80} />
-            <KpiCard icon={DollarSign} label="Total Budget"    value={summary.totalBudget}    sub="Across shown campaigns"                                color="rose"    delay={120} format={(n) => `$${n.toLocaleString('en-US')}`} />
+            <KpiCard icon={DollarSign} label="Total Budget"    value={summary.totalBudget}    sub="Across shown campaigns"                                color="rose"    delay={120} format={formatCurrency} />
             <KpiCard icon={Star}       label="Follow-ups"      value={monitoringSummary.totalFollowUps} sub="Generated from campaigns"                    color="purple"  delay={160} />
           </div>
         </div>
@@ -400,7 +425,8 @@ export default function Campaigns() {
           </div>
 
           <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-5">
-            <MiniStat icon={CheckCircle2} label="Qualified"       value={summary.totalQualified}              color="emerald" sub={`${summary.conversion}% conv.`} />
+            <MiniStat icon={CheckCircle2} label="Qualified" value={summary.totalQualified} color="emerald"
+              sub={`${summary.totalLeads ? Math.round((summary.totalQualified / summary.totalLeads) * 100) : 0}% of leads`} />
             <MiniStat icon={PhoneOff}     label="No Answer"       value={monitoringSummary.totalNoAnswer}     color="rose" />
             <MiniStat icon={XCircle}      label="Not Interested"  value={monitoringSummary.totalNotInterested} color="rose" />
             <MiniStat icon={Layers}       label="Follow-ups"      value={monitoringSummary.totalFollowUps}    color="purple" />
@@ -415,7 +441,7 @@ export default function Campaigns() {
             <input
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search by campaign name, channel, executive…"
+              placeholder="Search by name, type, channel, project, executive…"
               className="w-full rounded-full border border-brand-lilac bg-white py-2.5 pl-11 pr-10 text-sm outline-none focus:border-brand-magenta focus:ring-2 focus:ring-brand-magenta/15"
             />
             {searchQuery && (
@@ -468,7 +494,7 @@ export default function Campaigns() {
         {filtered.length === 0 ? (
           <EmptyState hasFilters={hasFilters} onClear={clearFilters} onCreate={() => { setEditing(null); setShowModal(true); }} />
         ) : viewMode === 'grid' ? (
-          <div className="grid grid-cols-1 gap-4 pb-40 md:grid-cols-2 xl:grid-cols-3">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
             {filtered.map((c) => (
               <CampaignCard
                 key={c.id}
@@ -482,7 +508,7 @@ export default function Campaigns() {
             ))}
           </div>
         ) : (
-          <div className="space-y-2 pb-40">
+          <div className="space-y-2">
             {filtered.map((c) => (
               <CampaignRow
                 key={c.id}
@@ -511,16 +537,16 @@ export default function Campaigns() {
         {viewing && (
           <CampaignDetailsDrawer
             campaign={viewing}
-            onClose={() => setViewing(null)}
-            onEdit={() => { setEditing(viewing); setViewing(null); setShowModal(true); }}
-            onMonitoring={() => { setMonitoring(viewing); setViewing(null); }}
-            onToggle={() => { handleToggle(viewing.id, viewing.status); setViewing(null); }}
+            onClose={() => setViewingId(null)}
+            onEdit={() => { setEditing(viewing); setViewingId(null); setShowModal(true); }}
+            onMonitoring={() => { setMonitoringId(viewing.id); setViewingId(null); }}
+            onToggle={() => handleToggle(viewing.id, viewing.status)}
             onStatusChange={(s) => handleStatusChange(viewing.id, s)}
           />
         )}
 
         {monitoring && (
-          <CampaignMonitoringDrawer campaign={monitoring} onClose={() => setMonitoring(null)} />
+          <CampaignMonitoringDrawer campaign={monitoring} onClose={() => setMonitoringId(null)} />
         )}
 
         {confirmDelete && (
@@ -602,18 +628,20 @@ function MiniStat({ icon: Icon, label, value, color = 'purple', sub }) {
 
 function useAnimatedCount(target, duration = 600) {
   const [display, setDisplay] = useState(0);
-  const startRef = useRef(null);
+  const fromRef = useRef(0);
   const rafRef = useRef(null);
 
   useEffect(() => {
-    startRef.current = null;
-    const to = typeof target === 'number' && Number.isFinite(target) ? target : Number(target) || 0;
+    const to = Number.isFinite(Number(target)) ? Number(target) : 0;
+    const from = fromRef.current;
+    let start = null;
     const tick = (now) => {
-      if (startRef.current === null) startRef.current = now;
-      const elapsed = now - startRef.current;
-      const progress = Math.min(elapsed / duration, 1);
+      if (start === null) start = now;
+      const progress = Math.min((now - start) / duration, 1);
       const eased = 1 - Math.pow(1 - progress, 3);
-      setDisplay(Math.round(to * eased));
+      const val = Math.round(from + (to - from) * eased);
+      fromRef.current = val;
+      setDisplay(val);
       if (progress < 1) rafRef.current = requestAnimationFrame(tick);
     };
     rafRef.current = requestAnimationFrame(tick);
@@ -704,7 +732,7 @@ function CampaignCard({ campaign: c, onView, onEdit, onToggle, onMonitoring, onD
   const cpl = c.leads ? (c.budget / c.leads) : 0;
   const conversionRate = c.leads ? Math.round((c.converted / c.leads) * 100) : 0;
 
-  const isCompleted = c.status === 'Completed';
+  const isCompleted = c.status === 'Completed' || c.status === 'Cancelled';
   const isActive = c.status === 'Active';
 
   return (
@@ -761,7 +789,7 @@ function CampaignCard({ campaign: c, onView, onEdit, onToggle, onMonitoring, onD
           <div className="min-w-0">
             <p className="font-mono text-[9px] uppercase tracking-wider text-brand-ink/50">Cost Per Lead</p>
             <p className="truncate font-display text-sm font-bold text-brand-magenta">
-              {cpl ? `$${cpl.toFixed(2)}` : '—'}
+              {formatCpl(cpl)}
             </p>
           </div>
           <div className="flex justify-end">
@@ -836,7 +864,7 @@ function CampaignRow({ campaign: c, onView, onEdit, onToggle, onMonitoring, onDe
   const st = STATUS_STYLES[c.status] || STATUS_STYLES.Draft;
   const StatusIcon = st.icon;
   const conversionRate = c.leads ? Math.round((c.converted / c.leads) * 100) : 0;
-  const isCompleted = c.status === 'Completed';
+  const isCompleted = c.status === 'Completed' || c.status === 'Cancelled';
   const isActive = c.status === 'Active';
 
   return (
@@ -983,7 +1011,7 @@ function CampaignModal({ mode = 'create', initial = null, defaultAssignee, onClo
     project: seed.project || '',
     channel: seed.channel || 'Google Ads',
     audience: seed.audience || '',
-    startDate: seed.startDate || new Date().toISOString().slice(0, 10),
+    startDate: seed.startDate || todayLocal(),
     endDate: seed.endDate || '',
     budget: seed.budget ?? '',
     objective: seed.objective || '',
@@ -1007,8 +1035,9 @@ function CampaignModal({ mode = 'create', initial = null, defaultAssignee, onClo
     if (!form.project.trim()) return 'Project is required.';
     if (!form.startDate) return 'Start date is required.';
     if (!form.endDate) return 'End date is required.';
-    if (form.endDate < form.startDate) return 'End date must be after start date.';
+    if (form.endDate < form.startDate) return 'End date must be on or after the start date.';
     if (!form.budget || Number(form.budget) <= 0) return 'Budget must be greater than 0.';
+    if (form.targetLeads !== '' && Number(form.targetLeads) < 0) return 'Target leads cannot be negative.';
     return null;
   };
 
@@ -1055,7 +1084,7 @@ function CampaignModal({ mode = 'create', initial = null, defaultAssignee, onClo
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="max-h-[75vh] space-y-5 overflow-y-auto p-6">
+        <form onSubmit={handleSubmit} noValidate className="max-h-[75vh] space-y-5 overflow-y-auto p-6">
           <SectionTitle icon={Info} label="Basic Information" />
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <ModalInput
@@ -1092,14 +1121,14 @@ function CampaignModal({ mode = 'create', initial = null, defaultAssignee, onClo
           <SectionTitle icon={Target} label="Target & Schedule" />
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <ModalInput label="Target Audience" value={form.audience} onChange={(v) => setForm({ ...form, audience: v })} placeholder="e.g. Age 25-40, Metro cities" icon={Users} />
-            <ModalInput label="Target Leads" type="number" value={form.targetLeads} onChange={(v) => setForm({ ...form, targetLeads: v })} placeholder="e.g. 500" icon={Target} />
+            <ModalInput label="Target Leads" type="number" min={0} value={form.targetLeads} onChange={(v) => setForm({ ...form, targetLeads: v })} placeholder="e.g. 500" icon={Target} />
             <ModalInput label="Start Date *" type="date" value={form.startDate} onChange={(v) => setForm({ ...form, startDate: v })} icon={Calendar} />
-            <ModalInput label="End Date *"   type="date" value={form.endDate}   onChange={(v) => setForm({ ...form, endDate: v })}   icon={Calendar} />
+            <ModalInput label="End Date *" type="date" min={form.startDate} value={form.endDate} onChange={(v) => setForm({ ...form, endDate: v })} icon={Calendar} />
           </div>
 
           <SectionTitle icon={DollarSign} label="Budget & Assignment" />
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            <ModalInput label="Campaign Budget (USD) *" type="number" value={form.budget} onChange={(v) => setForm({ ...form, budget: v })} placeholder="e.g. 5000" icon={DollarSign} />
+            <ModalInput label="Campaign Budget (USD) *" type="number" min={0} value={form.budget} onChange={(v) => setForm({ ...form, budget: v })} placeholder="e.g. 5000" icon={DollarSign} />
             <ModalInput label="Assigned Marketing Executive" value={form.assignedTo} onChange={(v) => setForm({ ...form, assignedTo: v })} placeholder="e.g. John Doe" icon={User} />
             <div className="md:col-span-2">
               <label className="mb-1.5 block text-xs font-semibold text-brand-ink/70">Campaign Objective</label>
@@ -1113,7 +1142,7 @@ function CampaignModal({ mode = 'create', initial = null, defaultAssignee, onClo
             </div>
           </div>
 
-          <SectionTitle icon={Zap} label="Initial Status" />
+          <SectionTitle icon={Zap} label={isEdit ? 'Status' : 'Initial Status'} />
           <div className="flex flex-wrap gap-2">
             {CAMPAIGN_STATUSES.map((s) => {
               const st = STATUS_STYLES[s];
@@ -1171,7 +1200,7 @@ function SectionTitle({ icon: Icon, label }) {
   );
 }
 
-function ModalInput({ label, type = 'text', value, onChange, placeholder, icon: Icon, required, inputRef }) {
+function ModalInput({ label, type = 'text', value, onChange, placeholder, icon: Icon, required, inputRef, min }) {
   return (
     <div>
       <label className="mb-1.5 block text-xs font-semibold text-brand-ink/70">{label}</label>
@@ -1182,6 +1211,7 @@ function ModalInput({ label, type = 'text', value, onChange, placeholder, icon: 
           type={type}
           value={value}
           required={required}
+          min={min}
           onChange={(e) => onChange(e.target.value)}
           placeholder={placeholder}
           className={`w-full rounded-xl border border-brand-lilac bg-white py-2.5 ${Icon ? 'pl-10' : 'pl-3.5'} pr-3.5 text-sm outline-none focus:border-brand-magenta focus:ring-2 focus:ring-brand-magenta/15`}
@@ -1274,7 +1304,7 @@ function CampaignDetailsDrawer({ campaign: c, onClose, onEdit, onMonitoring, onT
               <InfoRow icon={Calendar}   label="Start Date"        value={formatDate(c.startDate)} />
               <InfoRow icon={Calendar}   label="End Date"          value={formatDate(c.endDate)} />
               <InfoRow icon={DollarSign} label="Budget"            value={formatCurrency(c.budget)} />
-              <InfoRow icon={TrendingUp} label="Cost Per Lead"     value={cpl ? `$${cpl.toFixed(2)}` : '—'} />
+              <InfoRow icon={TrendingUp} label="Cost Per Lead"     value={formatCpl(cpl)} />
               <InfoRow icon={Target}     label="Target Leads"      value={c.targetLeads || '—'} />
               <InfoRow icon={User}       label="Assigned To"       value={c.assignedTo || '—'} />
             </div>
@@ -1375,7 +1405,7 @@ function CampaignMonitoringDrawer({ campaign: c, onClose }) {
       ['Not Interested', c.notInterested || 0], ['Follow-ups', c.followUpsGenerated || 0],
       ['CPL', cpl.toFixed(2)], ['Conversion Rate', `${conversionRate}%`], ['Target Progress', `${targetProgress}%`],
     ];
-    const csv = rows.map((r) => r.map(csvCell).join(',')).join('\n');
+    downloadCsv(rows, `campaign-monitoring-${c.id}.csv`);
     const blob = new Blob([csv], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -1439,7 +1469,7 @@ function CampaignMonitoringDrawer({ campaign: c, onClose }) {
             <MonitorTile icon={Star}         label="Follow-ups"     value={c.followUpsGenerated ?? 0}     tone="purple" subtitle="Generated" />
             <MonitorTile icon={PhoneOff}     label="No Answer"      value={c.noAnswer ?? 0}               tone="rose"    subtitle="Unreachable" />
             <MonitorTile icon={XCircle}      label="Not Interested" value={c.notInterested ?? 0}          tone="rose"    subtitle="Lost leads" />
-            <MonitorTile icon={DollarSign}   label="Cost Per Lead"  value={cpl ? `$${cpl.toFixed(2)}` : '—'} tone="amber" subtitle={`Budget ${formatCurrency(c.budget)}`} />
+            <MonitorTile icon={DollarSign}   label="Cost Per Lead"  value={formatCpl(cpl)} tone="amber" subtitle={`Budget ${formatCurrency(c.budget)}`} />
           </div>
 
           <div className="card !p-5">

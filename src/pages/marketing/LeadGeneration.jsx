@@ -1,13 +1,11 @@
 // src/pages/marketing/LeadGeneration.jsx
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Plus, Search, Filter, ChevronDown, Eye, Pencil,
-  Trash2, Check, AlertCircle, CheckCircle2, XCircle, X,
-  Users, Sparkles, Clock, Zap, Target, TrendingUp, TrendingDown,
-  Calendar, Globe, MapPin, Mail, Phone, Briefcase, Tag, Hash,
-  UserPlus, Layers, Flame, Inbox, Download, Grid3x3, List,
-  ArrowRight, Activity, User, DollarSign, Star, MessageSquare,
-  Megaphone, MousePointerClick, Smartphone,
+  Plus, Search, Filter, ChevronDown, Eye, Pencil, Trash2,
+  AlertCircle, CheckCircle2, XCircle, X, Users, Sparkles, Clock, Zap,
+  Target, Calendar, Globe, MapPin, Mail, Phone, Briefcase, UserPlus,
+  Flame, Inbox, Download, Grid3x3, List, Activity, User, Star,
+  MessageSquare, Megaphone, MousePointerClick,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 
@@ -100,6 +98,19 @@ const csvCell = (v) => {
   return `"${s.replace(/"/g, '""')}"`;
 };
 
+const downloadCsv = (rows, filename) => {
+  const csv = rows.map((r) => r.map(csvCell).join(',')).join('\n');
+  const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+};
+
 /* Local-timezone YYYY-MM-DD (fixes IST users seeing "yesterday") */
 const todayISO = () => {
   const d = new Date();
@@ -166,28 +177,32 @@ const syncCounterWithLeads = (leads) => {
   } catch { /* ignore */ }
 };
 
+const parseLocal = (val) => {
+  if (!val) return null;
+  const d = /^\d{4}-\d{2}-\d{2}$/.test(val) ? new Date(`${val}T00:00:00`) : new Date(val);
+  return isNaN(d.getTime()) ? null : d;
+};
+
 const formatDate = (val) => {
-  if (!val) return '—';
-  const d = new Date(val);
-  if (isNaN(d.getTime())) return '—';
-  return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+  const d = parseLocal(val);
+  return d ? d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
 };
 
 const formatShortDate = (val) => {
-  if (!val) return '—';
-  const d = new Date(val);
-  if (isNaN(d.getTime())) return '—';
-  return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' });
+  const d = parseLocal(val);
+  return d ? d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) : '—';
 };
 
 /* Escape-key hook */
 function useEscape(enabled, handler) {
+  const handlerRef = useRef(handler);
+  useEffect(() => { handlerRef.current = handler; });
   useEffect(() => {
     if (!enabled) return undefined;
-    const onKey = (e) => { if (e.key === 'Escape') handler(); };
+    const onKey = (e) => { if (e.key === 'Escape') handlerRef.current(); };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [enabled, handler]);
+  }, [enabled]);
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -212,7 +227,7 @@ const SEED_LEADS = [
    MAIN COMPONENT
    ═══════════════════════════════════════════════════════════════ */
 export default function LeadGeneration() {
-  const { user } = useAuth();
+  const { user } = useAuth() || {};
 
   const [leads, setLeads] = useState(() => loadState(SEED_LEADS));
   const [activeTab, setActiveTab] = useState('all');
@@ -228,15 +243,19 @@ export default function LeadGeneration() {
 
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState(null);
-  const [viewing, setViewing] = useState(null);
+  const [viewingId, setViewingId] = useState(null);
+  const viewing = useMemo(() => leads.find((l) => l.id === viewingId) || null, [leads, viewingId]);
   const [confirmDelete, setConfirmDelete] = useState(null);
 
   useEffect(() => { saveState(leads); }, [leads]);
   useEffect(() => { syncCounterWithLeads(leads); }, [leads]);
 
+  const toastTimer = useRef(null);
+  useEffect(() => () => clearTimeout(toastTimer.current), []);
   const showToast = (msg, type = 'success') => {
+    clearTimeout(toastTimer.current);
     setToast({ msg, type });
-    setTimeout(() => setToast(null), 2400);
+    toastTimer.current = setTimeout(() => setToast(null), 2400);
   };
 
   const tabCounts = useMemo(() => {
@@ -291,7 +310,7 @@ export default function LeadGeneration() {
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
       list = list.filter((l) =>
-        `${l.name} ${l.id} ${l.mobile} ${l.email} ${l.city} ${l.source} ${l.campaign}`
+        `${l.name} ${l.id} ${l.mobile} ${l.email} ${l.city} ${l.source} ${l.campaign} ${l.project || ''} ${l.assignedTo || ''}`
           .toLowerCase()
           .includes(q)
       );
@@ -322,6 +341,7 @@ export default function LeadGeneration() {
 
   const handleEdit = (id, updates) => {
     setLeads((prev) => prev.map((l) => (l.id === id ? { ...l, ...updates } : l)));
+    setShowModal(false);
     setEditing(null);
     showToast('Lead updated');
   };
@@ -348,14 +368,7 @@ export default function LeadGeneration() {
         l.project, l.status, l.priority, l.assignedTo, l.createdAt, l.notes || '',
       ]),
     ];
-    const csv = rows.map((r) => r.map(csvCell).join(',')).join('\n');
-    const blob = new Blob([csv], { type: 'text/csv' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `marketing-leads-${Date.now()}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
+    downloadCsv(rows, `marketing-leads-${Date.now()}.csv`);
     showToast(`Exported ${filtered.length} leads`);
   };
 
@@ -367,7 +380,7 @@ export default function LeadGeneration() {
     setCampaignFilter('All');
   };
 
-  const openView = (l) => setViewing(l);
+  const openView = (l) => setViewingId(l.id);
   const openEdit = (l) => { setEditing(l); setShowModal(true); };
   const openDelete = (l) => setConfirmDelete(l);
 
@@ -388,12 +401,12 @@ export default function LeadGeneration() {
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            <button
+            {/* <button
               onClick={handleExport}
               className="group inline-flex items-center gap-2 rounded-full border border-brand-lilac bg-white px-4 py-2 text-xs font-semibold text-brand-ink shadow-sm transition-all hover:-translate-y-0.5 hover:border-brand-magenta/40 hover:shadow-md"
             >
               <Download size={14} className="transition-transform group-hover:translate-y-0.5" /> Export
-            </button>
+            </button> */}
             <button
               onClick={() => { setEditing(null); setShowModal(true); }}
               className="group inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-brand-magenta to-brand-purple px-4 py-2 text-xs font-semibold text-white shadow-[0_6px_18px_-6px_rgba(227,28,121,0.6)] transition-all hover:-translate-y-0.5 hover:brightness-110"
@@ -432,7 +445,10 @@ export default function LeadGeneration() {
               return (
                 <button
                   key={t.key}
-                  onClick={() => setActiveTab(t.key)}
+                  onClick={() => {
+                    setActiveTab(t.key);
+                    if (t.key !== 'all' && t.key !== 'today') setStatusFilter('All');
+                  }}
                   className={`group inline-flex shrink-0 items-center gap-1.5 rounded-full px-3.5 py-2 text-xs font-semibold transition-all duration-200 ${
                     active
                       ? 'bg-gradient-to-r from-brand-magenta to-brand-purple text-white shadow-[0_4px_14px_-4px_rgba(227,28,121,0.5)] scale-[1.02]'
@@ -474,7 +490,7 @@ export default function LeadGeneration() {
             <input
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search by name, mobile, email, source…"
+              placeholder="Search by name, ID, mobile, email, city, campaign…"
               className="w-full rounded-full border border-brand-lilac bg-white py-2.5 pl-11 pr-10 text-sm outline-none focus:border-brand-magenta focus:ring-2 focus:ring-brand-magenta/15"
             />
             {searchQuery && (
@@ -497,7 +513,11 @@ export default function LeadGeneration() {
             options={['All', ...LEAD_STATUSES]}
             open={statusOpen}
             onToggle={() => { setStatusOpen((s) => !s); setSourceOpen(false); setCampaignOpen(false); }}
-            onChange={(v) => { setStatusFilter(v); setStatusOpen(false); }}
+            onChange={(v) => {
+              setStatusFilter(v);
+              setStatusOpen(false);
+              if (v !== 'All' && activeTab !== 'all' && activeTab !== 'today') setActiveTab('all');
+            }}
           />
 
           <DropdownFilter
@@ -525,9 +545,13 @@ export default function LeadGeneration() {
 
         {/* CONTENT */}
         {filtered.length === 0 ? (
-          <EmptyState hasFilters={hasFilters} onClear={clearFilters} onCreate={() => { setEditing(null); setShowModal(true); }} />
+          <EmptyState
+            hasFilters={hasFilters || activeTab !== 'all'}
+            onClear={() => { clearFilters(); setActiveTab('all'); }}
+            onCreate={() => { setEditing(null); setShowModal(true); }}
+          />
         ) : viewMode === 'grid' ? (
-          <div className="grid grid-cols-1 gap-4 pb-40 md:grid-cols-2 xl:grid-cols-3">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
             {filtered.map((l) => (
               <LeadCard
                 key={l.id}
@@ -539,7 +563,7 @@ export default function LeadGeneration() {
             ))}
           </div>
         ) : (
-          <div className="space-y-2 pb-40">
+          <div className="space-y-2 pb-16">
             {filtered.map((l) => (
               <LeadRow
                 key={l.id}
@@ -558,6 +582,7 @@ export default function LeadGeneration() {
             mode={editing ? 'edit' : 'create'}
             initial={editing}
             defaultAssignee={user?.name || ''}
+            existingLeads={leads}
             onClose={() => { setShowModal(false); setEditing(null); }}
             onSubmit={(data) => (editing ? handleEdit(editing.id, data) : handleCreate(data))}
           />
@@ -566,9 +591,9 @@ export default function LeadGeneration() {
         {viewing && (
           <LeadDetailDrawer
             lead={viewing}
-            onClose={() => setViewing(null)}
-            onEdit={() => { setEditing(viewing); setViewing(null); setShowModal(true); }}
-            onStatusChange={(s) => { handleStatusChange(viewing.id, s); setViewing(null); }}
+            onClose={() => setViewingId(null)}
+            onEdit={() => { setEditing(viewing); setViewingId(null); setShowModal(true); }}
+            onStatusChange={(s) => handleStatusChange(viewing.id, s)}
           />
         )}
 
@@ -617,7 +642,7 @@ function KpiCard({ icon: Icon, label, value, sub, color = 'purple', delay = 0 })
       </div>
 
       <div className="relative z-10 w-full">
-        <p className={`font-display text-3xl font-bold leading-tight tabular-nums ${t.valueColor}`}>{displayValue}</p>
+        <p className={`font-display text-3xl font-bold leading-tight tabular-nums ${t.valueColor}`}>{displayValue.toLocaleString()}</p>
         <p className="mt-0.5 text-xs font-semibold text-brand-ink/75">{label}</p>
         {sub && <p className="mt-0.5 font-mono text-[10px] uppercase tracking-wider text-brand-ink/50">{sub}</p>}
       </div>
@@ -627,25 +652,27 @@ function KpiCard({ icon: Icon, label, value, sub, color = 'purple', delay = 0 })
 
 function useAnimatedCount(target, duration = 600) {
   const [display, setDisplay] = useState(0);
-  const startRef = useRef(null);
+  const fromRef = useRef(0);
   const rafRef = useRef(null);
 
   useEffect(() => {
-    startRef.current = null;
-    const to = typeof target === 'number' && Number.isFinite(target) ? target : Number(target) || 0;
+    const to = Number.isFinite(Number(target)) ? Number(target) : 0;
+    const from = fromRef.current;
+    let start = null;
     const tick = (now) => {
-      if (startRef.current === null) startRef.current = now;
-      const elapsed = now - startRef.current;
-      const progress = Math.min(elapsed / duration, 1);
+      if (start === null) start = now;
+      const progress = Math.min((now - start) / duration, 1);
       const eased = 1 - Math.pow(1 - progress, 3);
-      setDisplay(Math.round(to * eased));
+      const val = Math.round(from + (to - from) * eased);
+      fromRef.current = val;
+      setDisplay(val);
       if (progress < 1) rafRef.current = requestAnimationFrame(tick);
     };
     rafRef.current = requestAnimationFrame(tick);
     return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); };
   }, [target, duration]);
 
-  return display.toLocaleString();
+  return display;
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -882,7 +909,7 @@ function LeadRow({ lead: l, onView, onEdit, onDelete }) {
 /* ═══════════════════════════════════════════════════════════════
    LEAD MODAL (Create/Edit)
    ═══════════════════════════════════════════════════════════════ */
-function LeadModal({ mode = 'create', initial = null, defaultAssignee, onClose, onSubmit }) {
+function LeadModal({ mode = 'create', initial = null, defaultAssignee, existingLeads = [], onClose, onSubmit }) {
   const seed = initial || {};
   const isEdit = mode === 'edit';
 
@@ -913,7 +940,9 @@ function LeadModal({ mode = 'create', initial = null, defaultAssignee, onClose, 
   const validate = () => {
     if (!form.name.trim()) return 'Name is required.';
     if (!/^\d{10}$/.test(form.mobile.trim())) return 'Mobile must be exactly 10 digits.';
-    if (form.email && !/^\S+@\S+\.\S+$/.test(form.email)) return 'Enter a valid email.';
+    const dup = existingLeads.find((l) => l.mobile === form.mobile.trim() && l.id !== seed.id);
+    if (dup) return `A lead with this mobile already exists (${dup.name}, ${dup.id}).`;
+    if (form.email.trim() && !/^\S+@\S+\.\S+$/.test(form.email.trim())) return 'Enter a valid email.';
     if (!form.source) return 'Source is required.';
     return null;
   };
@@ -926,7 +955,17 @@ function LeadModal({ mode = 'create', initial = null, defaultAssignee, onClose, 
     setSubmitting(true);
     timeoutRef.current = setTimeout(() => {
       setSubmitting(false);
-      onSubmit(form);
+      onSubmit({
+        ...form,
+        name: form.name.trim(),
+        mobile: form.mobile.trim(),
+        email: form.email.trim(),
+        city: form.city.trim(),
+        campaign: form.campaign.trim(),
+        project: form.project.trim(),
+        assignedTo: form.assignedTo.trim(),
+        notes: form.notes.trim(),
+      });
     }, 250);
   };
 
@@ -957,7 +996,7 @@ function LeadModal({ mode = 'create', initial = null, defaultAssignee, onClose, 
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="max-h-[75vh] space-y-5 overflow-y-auto p-6">
+        <form onSubmit={handleSubmit} noValidate className="max-h-[75vh] space-y-5 overflow-y-auto p-6">
           <SectionTitle icon={User} label="Contact Information" />
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <ModalInput
@@ -1121,7 +1160,7 @@ function SectionTitle({ icon: Icon, label }) {
   );
 }
 
-function ModalInput({ label, type = 'text', value, onChange, placeholder, icon: Icon, required, inputRef }) {
+function ModalInput({ label, type = 'text', value, onChange, placeholder, icon: Icon, required, inputRef, inputMode, maxLength }) {
   return (
     <div>
       <label className="mb-1.5 block text-xs font-semibold text-brand-ink/70">{label}</label>
@@ -1132,6 +1171,8 @@ function ModalInput({ label, type = 'text', value, onChange, placeholder, icon: 
           type={type}
           value={value}
           required={required}
+          inputMode={inputMode}
+          maxLength={maxLength}
           onChange={(e) => onChange(e.target.value)}
           placeholder={placeholder}
           className={`w-full rounded-xl border border-brand-lilac bg-white py-2.5 ${Icon ? 'pl-10' : 'pl-3.5'} pr-3.5 text-sm outline-none focus:border-brand-magenta focus:ring-2 focus:ring-brand-magenta/15`}

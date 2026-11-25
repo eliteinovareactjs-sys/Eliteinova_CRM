@@ -1,15 +1,11 @@
 // src/pages/marketing/LeadSources.jsx
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Plus, Search, Filter, ChevronDown, Eye, Pencil,
-  Trash2, Copy, AlertCircle, CheckCircle2, XCircle, X, Users,
-  Sparkles, Clock, Zap, Target, TrendingUp, TrendingDown, Calendar,
-  Globe, MapPin, Briefcase, Tag, Hash, UserPlus, Layers, Flame,
-  Inbox, Download, Grid3x3, List, ArrowRight, Activity, DollarSign,
-  Star, Megaphone, MousePointerClick, MessageSquare, BarChart3,
-  Share2, CircleDot, Building2,
+  Plus, Search, Filter, ChevronDown, Eye, Pencil, Trash2, Copy,
+  AlertCircle, CheckCircle2, X, Users, Clock, Zap, Target, Calendar,
+  Globe, Briefcase, Tag, Layers, Inbox, Download, Grid3x3, List,
+  Activity, DollarSign, Megaphone, MousePointerClick, BarChart3, Share2,
 } from 'lucide-react';
-import { useAuth } from '../../context/AuthContext';
 
 /* ═══════════════════════════════════════════════════════════════
    INLINE BRAND ICONS
@@ -58,14 +54,14 @@ const STATUS_STYLES = {
 };
 
 const CATEGORY_ICONS = {
-  'Website':              Globe,
-  'Google Ads':           Target,
-  'Meta Ads':             FacebookIcon,
-  'WhatsApp':             WhatsappIcon,
-  'Social Media':         InstagramIcon,
-  'Referral':             Users,
-  'Campaign':             Megaphone,
-  'Other Sources':        Share2,
+  'Website':       Globe,
+  'Google Ads':    Target,
+  'Meta Ads':      FacebookIcon,
+  'WhatsApp':      WhatsappIcon,
+  'Social Media':  InstagramIcon,
+  'Referral':      Users,
+  'Campaign':      Megaphone,
+  'Other Sources': Share2,
 };
 
 const SOURCE_TYPES = [
@@ -84,12 +80,18 @@ const csvCell = (v) => {
   return `"${s.replace(/"/g, '""')}"`;
 };
 
-/* Local-timezone today (YYYY-MM-DD) */
-const todayISO = () => {
-  const d = new Date();
-  const off = d.getTimezoneOffset();
-  const local = new Date(d.getTime() - off * 60 * 1000);
-  return local.toISOString().slice(0, 10);
+/* Reliable CSV download (Firefox/Safari safe, Excel-friendly UTF-8 BOM) */
+const downloadCsv = (rows, filename) => {
+  const csv = rows.map((r) => r.map(csvCell).join(',')).join('\n');
+  const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 };
 
 /* Normalize legacy/partial records */
@@ -125,6 +127,7 @@ const saveState = (value) => {
 };
 
 const formatCurrency = (n) => `$${Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const formatCpl = (n) => (Number(n) ? `$${Number(n).toFixed(2)}` : '—');
 
 const formatDate = (val) => {
   if (!val) return '—';
@@ -133,14 +136,16 @@ const formatDate = (val) => {
   return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
 };
 
-/* Escape-key hook */
+/* Escape-key hook (stable listener, always calls latest handler) */
 function useEscape(enabled, handler) {
+  const handlerRef = useRef(handler);
+  useEffect(() => { handlerRef.current = handler; });
   useEffect(() => {
     if (!enabled) return undefined;
-    const onKey = (e) => { if (e.key === 'Escape') handler(); };
+    const onKey = (e) => { if (e.key === 'Escape') handlerRef.current(); };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [enabled, handler]);
+  }, [enabled]);
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -162,8 +167,6 @@ const SEED_SOURCES = [
    MAIN COMPONENT
    ═══════════════════════════════════════════════════════════════ */
 export default function LeadSources() {
-  const { user } = useAuth();
-
   const [sources, setSources] = useState(() => loadState(SEED_SOURCES));
   const [activeTab, setActiveTab] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
@@ -176,8 +179,14 @@ export default function LeadSources() {
 
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState(null);
-  const [viewing, setViewing] = useState(null);
+  const [viewingId, setViewingId] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(null);
+
+  // Derived from live data so the drawer never shows stale info
+  const viewing = useMemo(
+    () => sources.find((s) => s.id === viewingId) || null,
+    [sources, viewingId]
+  );
 
   const toastTimerRef = useRef(null);
 
@@ -192,15 +201,15 @@ export default function LeadSources() {
 
   /* ── TABS ── */
   const TABS = [
-    { key: 'all',             label: 'All Sources',    icon: Share2 },
-    { key: 'Website',         label: 'Website',        icon: Globe },
-    { key: 'Google Ads',      label: 'Google Ads',     icon: Target },
-    { key: 'Meta Ads',        label: 'Meta Ads',       icon: FacebookIcon },
-    { key: 'WhatsApp',        label: 'WhatsApp',       icon: WhatsappIcon },
-    { key: 'Social Media',    label: 'Social Media',   icon: InstagramIcon },
-    { key: 'Referral',        label: 'Referral',       icon: Users },
-    { key: 'Campaign',        label: 'Campaign',       icon: Megaphone },
-    { key: 'Other Sources',   label: 'Other Sources',  icon: Layers },
+    { key: 'all',           label: 'All Sources',   icon: Share2 },
+    { key: 'Website',       label: 'Website',       icon: Globe },
+    { key: 'Google Ads',    label: 'Google Ads',    icon: Target },
+    { key: 'Meta Ads',      label: 'Meta Ads',      icon: FacebookIcon },
+    { key: 'WhatsApp',      label: 'WhatsApp',      icon: WhatsappIcon },
+    { key: 'Social Media',  label: 'Social Media',  icon: InstagramIcon },
+    { key: 'Referral',      label: 'Referral',      icon: Users },
+    { key: 'Campaign',      label: 'Campaign',      icon: Megaphone },
+    { key: 'Other Sources', label: 'Other Sources', icon: Layers },
   ];
 
   const tabCounts = useMemo(() => {
@@ -222,7 +231,7 @@ export default function LeadSources() {
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
       list = list.filter((s) =>
-        `${s.source} ${s.category} ${s.campaign} ${s.landingPage}`
+        `${s.source} ${s.category} ${s.sourceType || ''} ${s.campaign} ${s.landingPage} ${s.status}`
           .toLowerCase()
           .includes(q)
       );
@@ -267,6 +276,7 @@ export default function LeadSources() {
 
   const handleEdit = (id, updates) => {
     setSources((prev) => prev.map((s) => (s.id === id ? { ...s, ...updates } : s)));
+    setShowModal(false);
     setEditing(null);
     showToast('Source updated');
   };
@@ -307,18 +317,12 @@ export default function LeadSources() {
         s.leads, s.qualified, s.converted, s.cpl, s.budget, s.status,
       ]),
     ];
-    const csv = rows.map((r) => r.map(csvCell).join(',')).join('\n');
-    const blob = new Blob([csv], { type: 'text/csv' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `lead-sources-${Date.now()}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
+    downloadCsv(rows, `lead-sources-${Date.now()}.csv`);
     showToast(`Exported ${filtered.length} sources`);
   };
 
-  const hasFilters = !!searchQuery || categoryFilter !== 'All' || statusFilter !== 'All';
+  const hasFilters =
+    !!searchQuery || categoryFilter !== 'All' || statusFilter !== 'All' || activeTab !== 'all';
   const clearFilters = () => {
     setSearchQuery('');
     setCategoryFilter('All');
@@ -326,7 +330,7 @@ export default function LeadSources() {
     setActiveTab('all');
   };
 
-  const openView = (s) => setViewing(s);
+  const openView = (s) => setViewingId(s.id);
   const openEdit = (s) => { setEditing(s); setShowModal(true); };
   const openDelete = (s) => setConfirmDelete(s);
 
@@ -347,12 +351,12 @@ export default function LeadSources() {
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            <button
+            {/* <button
               onClick={handleExport}
               className="group inline-flex items-center gap-2 rounded-full border border-brand-lilac bg-white px-4 py-2 text-xs font-semibold text-brand-ink shadow-sm transition-all hover:-translate-y-0.5 hover:border-brand-magenta/40 hover:shadow-md"
             >
               <Download size={14} className="transition-transform group-hover:translate-y-0.5" /> Export
-            </button>
+            </button> */}
             <button
               onClick={() => { setEditing(null); setShowModal(true); }}
               className="group inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-brand-magenta to-brand-purple px-4 py-2 text-xs font-semibold text-white shadow-[0_6px_18px_-6px_rgba(227,28,121,0.6)] transition-all hover:-translate-y-0.5 hover:brightness-110"
@@ -377,7 +381,7 @@ export default function LeadSources() {
             <KpiCard icon={Users}        label="Total Leads"   value={summary.totalLeads}      sub="Across all sources" color="emerald" delay={40} />
             <KpiCard icon={CheckCircle2} label="Qualified"     value={summary.totalQualified}  sub="Ready to convert"   color="purple"  delay={80} />
             <KpiCard icon={Target}       label="Converted"     value={summary.totalConverted}  sub="Won from sources"   color="emerald" delay={120} />
-            <KpiCard icon={DollarSign}   label="Avg. CPL"      value={summary.avgCPL}          sub="Blended average"    color="amber"   delay={160} format={(n) => `$${Number(n).toFixed(2)}`} />
+            <KpiCard icon={DollarSign}   label="Avg. CPL"      value={summary.avgCPL}          sub="Blended average"    color="amber"   delay={160} decimals={2} format={formatCpl} />
           </div>
         </div>
 
@@ -391,7 +395,7 @@ export default function LeadSources() {
               return (
                 <button
                   key={t.key}
-                  onClick={() => setActiveTab(t.key)}
+                  onClick={() => { setActiveTab(t.key); setCategoryFilter('All'); }}
                   className={`group inline-flex shrink-0 items-center gap-1.5 rounded-full px-3.5 py-2 text-xs font-semibold transition-all duration-200 ${
                     active
                       ? 'bg-gradient-to-r from-brand-magenta to-brand-purple text-white shadow-[0_4px_14px_-4px_rgba(227,28,121,0.5)] scale-[1.02]'
@@ -431,7 +435,7 @@ export default function LeadSources() {
             <input
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search by source, campaign, landing page…"
+              placeholder="Search by source, type, campaign, status…"
               className="w-full rounded-full border border-brand-lilac bg-white py-2.5 pl-11 pr-10 text-sm outline-none focus:border-brand-magenta focus:ring-2 focus:ring-brand-magenta/15"
             />
             {searchQuery && (
@@ -446,7 +450,7 @@ export default function LeadSources() {
             options={['All', ...SOURCE_CATEGORIES]}
             open={categoryOpen}
             onToggle={() => { setCategoryOpen((s) => !s); setStatusOpen(false); }}
-            onChange={(v) => { setCategoryFilter(v); setCategoryOpen(false); }}
+            onChange={(v) => { setCategoryFilter(v); setCategoryOpen(false); setActiveTab('all'); }}
           />
 
           <DropdownFilter
@@ -476,7 +480,7 @@ export default function LeadSources() {
         {filtered.length === 0 ? (
           <EmptyState hasFilters={hasFilters} onClear={clearFilters} onCreate={() => { setEditing(null); setShowModal(true); }} />
         ) : viewMode === 'grid' ? (
-          <div className="grid grid-cols-1 gap-4 pb-40 md:grid-cols-2 xl:grid-cols-3">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
             {filtered.map((s) => (
               <SourceCard
                 key={s.id}
@@ -488,19 +492,19 @@ export default function LeadSources() {
             ))}
           </div>
         ) : (
-          <div className="card !p-0 overflow-hidden">
-            <table className="w-full table-fixed text-left text-sm">
+          <div className="card !p-0 overflow-x-auto">
+            <table className="w-full min-w-[960px] table-fixed text-left text-sm">
               <thead className="border-b border-brand-lilac/60 bg-brand-mist/40 text-[10px] font-bold uppercase tracking-wider text-brand-ink/60">
                 <tr>
-                  <th className="w-[16%] px-3 py-3">Source</th>
-                  <th className="w-[16%] px-3 py-3">Campaign</th>
-                  <th className="w-[14%] px-3 py-3">Landing Page</th>
-                  <th className="w-[9%] px-3 py-3 text-right">Leads</th>
+                  <th className="w-[15%] px-3 py-3">Source</th>
+                  <th className="w-[14%] px-3 py-3">Campaign</th>
+                  <th className="w-[13%] px-3 py-3">Landing Page</th>
+                  <th className="w-[8%] px-3 py-3 text-right">Leads</th>
                   <th className="w-[9%] px-3 py-3 text-right">Qualified</th>
                   <th className="w-[9%] px-3 py-3 text-right">Converted</th>
-                  <th className="w-[9%] px-3 py-3 text-right">CPL</th>
-                  <th className="w-[13%] px-3 py-3 text-center">Status</th>
-                  <th className="w-[14%] px-3 py-3 text-center">Actions</th>
+                  <th className="w-[8%] px-3 py-3 text-right">CPL</th>
+                  <th className="w-[12%] px-3 py-3 text-center">Status</th>
+                  <th className="w-[12%] px-2 py-3 text-center">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-brand-lilac/40">
@@ -527,26 +531,26 @@ export default function LeadSources() {
 
                       {/* Campaign */}
                       <td className="px-3 py-3">
-                        <p className="truncate text-xs text-brand-ink/70" title={s.campaign}>{s.campaign}</p>
+                        <p className="truncate text-xs text-brand-ink/70" title={s.campaign}>{s.campaign || '—'}</p>
                       </td>
 
                       {/* Landing Page */}
                       <td className="px-3 py-3">
-                        <p className="truncate font-mono text-[11px] text-brand-ink/50" title={s.landingPage}>{s.landingPage}</p>
+                        <p className="truncate font-mono text-[11px] text-brand-ink/50" title={s.landingPage}>{s.landingPage || '—'}</p>
                       </td>
 
                       {/* Leads */}
                       <td className="px-3 py-3 text-right text-xs font-semibold tabular-nums">{s.leads}</td>
 
                       {/* Qualified */}
-                      <td className="px-3 py-3 text-right text-xs tabular-nums text-brand-purple font-medium">{s.qualified}</td>
+                      <td className="px-3 py-3 text-right text-xs font-medium tabular-nums text-brand-purple">{s.qualified}</td>
 
                       {/* Converted */}
-                      <td className="px-3 py-3 text-right text-xs tabular-nums text-emerald-600 font-medium">{s.converted}</td>
+                      <td className="px-3 py-3 text-right text-xs font-medium tabular-nums text-emerald-600">{s.converted}</td>
 
                       {/* CPL */}
-                      <td className="px-3 py-3 text-right text-xs tabular-nums text-brand-magenta font-medium">
-                        {s.cpl ? `$${s.cpl.toFixed(2)}` : '—'}
+                      <td className="px-3 py-3 text-right text-xs font-medium tabular-nums text-brand-magenta">
+                        {formatCpl(s.cpl)}
                       </td>
 
                       {/* Status */}
@@ -560,23 +564,13 @@ export default function LeadSources() {
                       </td>
 
                       {/* Actions */}
-                      <td className="px-3 py-3">
-                        <div className="flex items-center justify-center gap-2">
-                          <button
-                            onClick={() => openView(s)}
-                            className="flex h-7 items-center gap-1 rounded-lg border border-brand-lilac bg-white px-2 text-[10px] font-semibold text-brand-ink transition-all hover:border-brand-magenta/40 hover:bg-brand-magenta/5 hover:text-brand-magenta"
-                            title="View details"
-                          >
-                            <Eye size={11} /> View
-                          </button>
-                          <button
-                            onClick={() => openEdit(s)}
-                            className="flex h-7 items-center gap-1 rounded-lg bg-gradient-to-r from-brand-magenta to-brand-purple px-2 text-[10px] font-semibold text-white shadow-card transition-all hover:brightness-110"
-                            title="Edit source"
-                          >
-                            <Pencil size={10} /> Edit
-                          </button>
-                        </div>
+                      <td className="px-2 py-3">
+                        <RowActions
+                          onView={() => openView(s)}
+                          onEdit={() => openEdit(s)}
+                          onDuplicate={() => handleDuplicate(s)}
+                          onDelete={() => openDelete(s)}
+                        />
                       </td>
                     </tr>
                   );
@@ -591,6 +585,7 @@ export default function LeadSources() {
           <SourceModal
             mode={editing ? 'edit' : 'create'}
             initial={editing}
+            existingSources={sources}
             onClose={() => { setShowModal(false); setEditing(null); }}
             onSubmit={(data) => (editing ? handleEdit(editing.id, data) : handleCreate(data))}
           />
@@ -599,9 +594,9 @@ export default function LeadSources() {
         {viewing && (
           <SourceDetailDrawer
             source={viewing}
-            onClose={() => setViewing(null)}
-            onEdit={() => { setEditing(viewing); setViewing(null); setShowModal(true); }}
-            onStatusChange={(s) => { handleStatusChange(viewing.id, s); setViewing(null); }}
+            onClose={() => setViewingId(null)}
+            onEdit={() => { setEditing(viewing); setViewingId(null); setShowModal(true); }}
+            onStatusChange={(s) => handleStatusChange(viewing.id, s)}
           />
         )}
 
@@ -624,9 +619,9 @@ export default function LeadSources() {
 /* ═══════════════════════════════════════════════════════════════
    KPI CARD
    ═══════════════════════════════════════════════════════════════ */
-function KpiCard({ icon: Icon, label, value, sub, color = 'purple', delay = 0, format }) {
-  const animated = useAnimatedCount(value);
-  const displayValue = format ? format(animated) : animated;
+function KpiCard({ icon: Icon, label, value, sub, color = 'purple', delay = 0, format, decimals = 0 }) {
+  const animated = useAnimatedCount(value, 600, decimals);
+  const displayValue = format ? format(animated) : animated.toLocaleString();
   const themes = {
     purple:  { border: 'border-violet-200 hover:border-violet-400', bg: 'from-violet-50 via-violet-50/30 to-white', iconBg: 'bg-violet-100 text-brand-purple border-violet-200', bar: 'from-brand-purple to-brand-magenta', glow: 'bg-brand-purple/25', shadow: 'hover:shadow-[0_15px_40px_-15px_rgba(139,47,214,0.45)]', valueColor: 'text-brand-purple' },
     emerald: { border: 'border-emerald-200 hover:border-emerald-400', bg: 'from-emerald-50 via-emerald-50/30 to-white', iconBg: 'bg-emerald-100 text-emerald-600 border-emerald-200', bar: 'from-emerald-500 to-emerald-400', glow: 'bg-emerald-500/25', shadow: 'hover:shadow-[0_15px_40px_-15px_rgba(16,185,129,0.4)]', valueColor: 'text-emerald-600' },
@@ -659,25 +654,29 @@ function KpiCard({ icon: Icon, label, value, sub, color = 'purple', delay = 0, f
   );
 }
 
-function useAnimatedCount(target, duration = 600) {
+/* Animates from the previous value (not from 0) and supports decimals */
+function useAnimatedCount(target, duration = 600, decimals = 0) {
   const [display, setDisplay] = useState(0);
-  const startRef = useRef(null);
+  const fromRef = useRef(0);
   const rafRef = useRef(null);
 
   useEffect(() => {
-    startRef.current = null;
-    const to = typeof target === 'number' && Number.isFinite(target) ? target : Number(target) || 0;
+    const to = Number.isFinite(Number(target)) ? Number(target) : 0;
+    const from = fromRef.current;
+    const factor = 10 ** decimals;
+    let start = null;
     const tick = (now) => {
-      if (startRef.current === null) startRef.current = now;
-      const elapsed = now - startRef.current;
-      const progress = Math.min(elapsed / duration, 1);
+      if (start === null) start = now;
+      const progress = Math.min((now - start) / duration, 1);
       const eased = 1 - Math.pow(1 - progress, 3);
-      setDisplay(Math.round(to * eased));
+      const val = Math.round((from + (to - from) * eased) * factor) / factor;
+      fromRef.current = val;
+      setDisplay(val);
       if (progress < 1) rafRef.current = requestAnimationFrame(tick);
     };
     rafRef.current = requestAnimationFrame(tick);
     return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); };
-  }, [target, duration]);
+  }, [target, duration, decimals]);
 
   return display;
 }
@@ -777,20 +776,20 @@ function SourceCard({ source: s, onView, onEdit, onDelete }) {
           <div className="grid grid-cols-[auto_1fr_auto] items-center gap-2">
             <Megaphone size={11} className="shrink-0 text-brand-ink/50" />
             <span className="truncate text-brand-ink/50">Campaign</span>
-            <span className="truncate text-right font-semibold text-brand-ink">{s.campaign}</span>
+            <span className="truncate text-right font-semibold text-brand-ink">{s.campaign || '—'}</span>
           </div>
           <div className="grid grid-cols-[auto_1fr_auto] items-center gap-2">
             <MousePointerClick size={11} className="shrink-0 text-brand-ink/50" />
             <span className="truncate text-brand-ink/50">Landing</span>
             <span className="truncate text-right font-mono text-[11px] font-semibold text-brand-ink" title={s.landingPage}>
-              {s.landingPage}
+              {s.landingPage || '—'}
             </span>
           </div>
           <div className="grid grid-cols-[auto_1fr_auto] items-center gap-2">
             <DollarSign size={11} className="shrink-0 text-brand-ink/50" />
             <span className="truncate text-brand-ink/50">CPL</span>
             <span className="truncate text-right font-semibold text-brand-magenta">
-              {s.cpl ? `$${s.cpl.toFixed(2)}` : '—'}
+              {formatCpl(s.cpl)}
             </span>
           </div>
         </div>
@@ -839,31 +838,43 @@ function SourceCard({ source: s, onView, onEdit, onDelete }) {
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   ROW ACTIONS (for table) — View + Edit + Delete visible
+   ROW ACTIONS (table) — View · Edit · Duplicate · Delete
    ═══════════════════════════════════════════════════════════════ */
-function RowActions({ onView, onEdit, onDelete }) {
+function RowActions({ onView, onEdit, onDuplicate, onDelete }) {
+  const base = 'inline-flex h-7 w-7 items-center justify-center rounded-lg border transition-all';
   return (
-    <div className="flex items-center justify-center gap-1.5">
+    <div className="flex items-center justify-center gap-1">
       <button
         onClick={onView}
-        className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-brand-lilac bg-white px-2.5 text-[11px] font-semibold text-brand-ink transition-all hover:border-brand-magenta/40 hover:bg-brand-magenta/5 hover:text-brand-magenta"
         title="View details"
+        aria-label="View details"
+        className={`${base} border-brand-lilac bg-white text-brand-ink hover:border-brand-magenta/40 hover:bg-brand-magenta/5 hover:text-brand-magenta`}
       >
-        <Eye size={12} /> View
+        <Eye size={12} />
       </button>
       <button
         onClick={onEdit}
-        className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-gradient-to-r from-brand-magenta to-brand-purple px-2.5 text-[11px] font-semibold text-white shadow-card transition-all hover:brightness-110"
         title="Edit source"
+        aria-label="Edit source"
+        className={`${base} border-transparent bg-gradient-to-r from-brand-magenta to-brand-purple text-white shadow-card hover:brightness-110`}
       >
-        <Pencil size={12} /> Edit
+        <Pencil size={12} />
+      </button>
+      <button
+        onClick={onDuplicate}
+        title="Duplicate source"
+        aria-label="Duplicate source"
+        className={`${base} border-brand-lilac bg-white text-brand-ink hover:border-brand-magenta/40 hover:bg-brand-magenta/5 hover:text-brand-magenta`}
+      >
+        <Copy size={12} />
       </button>
       <button
         onClick={onDelete}
-        className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-rose-200 bg-rose-50 px-2.5 text-[11px] font-semibold text-rose-500 transition-all hover:bg-rose-100"
         title="Delete source"
+        aria-label="Delete source"
+        className={`${base} border-rose-200 bg-rose-50 text-rose-500 hover:bg-rose-100`}
       >
-        <Trash2 size={12} /> Delete
+        <Trash2 size={12} />
       </button>
     </div>
   );
@@ -914,7 +925,7 @@ function ProgressBar({ label, value, tone = 'purple' }) {
 /* ═══════════════════════════════════════════════════════════════
    SOURCE MODAL (Create/Edit)
    ═══════════════════════════════════════════════════════════════ */
-function SourceModal({ mode = 'create', initial = null, onClose, onSubmit }) {
+function SourceModal({ mode = 'create', initial = null, existingSources = [], onClose, onSubmit }) {
   const seed = initial || {};
   const isEdit = mode === 'edit';
 
@@ -927,6 +938,9 @@ function SourceModal({ mode = 'create', initial = null, onClose, onSubmit }) {
     status: seed.status || 'Active',
     cpl: seed.cpl ?? '',
     budget: seed.budget ?? '',
+    leads: seed.leads ?? '',
+    qualified: seed.qualified ?? '',
+    converted: seed.converted ?? '',
   });
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -941,8 +955,22 @@ function SourceModal({ mode = 'create', initial = null, onClose, onSubmit }) {
     if (!form.source.trim()) return 'Source name is required.';
     if (!form.category) return 'Category is required.';
     if (!form.campaign.trim()) return 'Campaign is required.';
+
+    const key = `${form.source.trim()}|${form.campaign.trim()}`.toLowerCase();
+    const dup = existingSources.find(
+      (x) => `${x.source.trim()}|${(x.campaign || '').trim()}`.toLowerCase() === key && x.id !== seed.id
+    );
+    if (dup) return `"${dup.source}" with campaign "${dup.campaign}" already exists.`;
+
     if (form.cpl !== '' && Number(form.cpl) < 0) return 'CPL cannot be negative.';
     if (form.budget !== '' && Number(form.budget) < 0) return 'Budget cannot be negative.';
+
+    const leads = Number(form.leads) || 0;
+    const qualified = Number(form.qualified) || 0;
+    const converted = Number(form.converted) || 0;
+    if (leads < 0 || qualified < 0 || converted < 0) return 'Lead numbers cannot be negative.';
+    if (qualified > leads) return 'Qualified cannot be more than total leads.';
+    if (converted > leads) return 'Converted cannot be more than total leads.';
     return null;
   };
 
@@ -956,8 +984,14 @@ function SourceModal({ mode = 'create', initial = null, onClose, onSubmit }) {
       setSubmitting(false);
       onSubmit({
         ...form,
+        source: form.source.trim(),
+        campaign: form.campaign.trim(),
+        landingPage: form.landingPage.trim(),
         cpl: Number(form.cpl) || 0,
         budget: Number(form.budget) || 0,
+        leads: Number(form.leads) || 0,
+        qualified: Number(form.qualified) || 0,
+        converted: Number(form.converted) || 0,
       });
     }, 250);
   };
@@ -989,7 +1023,7 @@ function SourceModal({ mode = 'create', initial = null, onClose, onSubmit }) {
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="max-h-[75vh] space-y-5 overflow-y-auto p-6">
+        <form onSubmit={handleSubmit} noValidate className="max-h-[75vh] space-y-5 overflow-y-auto p-6">
           <SectionTitle icon={Share2} label="Source Information" />
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <ModalInput
@@ -1023,7 +1057,7 @@ function SourceModal({ mode = 'create', initial = null, onClose, onSubmit }) {
             <ModalInput
               label="Campaign *"
               value={form.campaign}
-              onChange={(v) => setForm({ ...form, campaign: v })}
+              onChange={(v) => { setForm({ ...form, campaign: v }); setError(''); }}
               placeholder="e.g. Search - CRM"
               icon={Megaphone}
             />
@@ -1038,23 +1072,41 @@ function SourceModal({ mode = 'create', initial = null, onClose, onSubmit }) {
             </div>
           </div>
 
+          <SectionTitle icon={Users} label="Lead Metrics" />
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+            <ModalInput
+              label="Total Leads" type="number" min={0} step={1}
+              value={form.leads}
+              onChange={(v) => setForm({ ...form, leads: v })}
+              placeholder="e.g. 450" icon={Users}
+            />
+            <ModalInput
+              label="Qualified" type="number" min={0} step={1}
+              value={form.qualified}
+              onChange={(v) => setForm({ ...form, qualified: v })}
+              placeholder="e.g. 120" icon={CheckCircle2}
+            />
+            <ModalInput
+              label="Converted" type="number" min={0} step={1}
+              value={form.converted}
+              onChange={(v) => setForm({ ...form, converted: v })}
+              placeholder="e.g. 35" icon={Target}
+            />
+          </div>
+
           <SectionTitle icon={DollarSign} label="Cost Metrics" />
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <ModalInput
-              label="Cost Per Lead (USD)"
-              type="number"
+              label="Cost Per Lead (USD)" type="number" min={0} step="0.01"
               value={form.cpl}
               onChange={(v) => setForm({ ...form, cpl: v })}
-              placeholder="e.g. 15.50"
-              icon={DollarSign}
+              placeholder="e.g. 15.50" icon={DollarSign}
             />
             <ModalInput
-              label="Budget (USD)"
-              type="number"
+              label="Budget (USD)" type="number" min={0} step="0.01"
               value={form.budget}
               onChange={(v) => setForm({ ...form, budget: v })}
-              placeholder="e.g. 5000"
-              icon={Target}
+              placeholder="e.g. 5000" icon={Target}
             />
           </div>
 
@@ -1116,7 +1168,7 @@ function SectionTitle({ icon: Icon, label }) {
   );
 }
 
-function ModalInput({ label, type = 'text', value, onChange, placeholder, icon: Icon, required, inputRef }) {
+function ModalInput({ label, type = 'text', value, onChange, placeholder, icon: Icon, required, inputRef, min, step }) {
   return (
     <div>
       <label className="mb-1.5 block text-xs font-semibold text-brand-ink/70">{label}</label>
@@ -1127,6 +1179,8 @@ function ModalInput({ label, type = 'text', value, onChange, placeholder, icon: 
           type={type}
           value={value}
           required={required}
+          min={min}
+          step={step}
           onChange={(e) => onChange(e.target.value)}
           placeholder={placeholder}
           className={`w-full rounded-xl border border-brand-lilac bg-white py-2.5 ${Icon ? 'pl-10' : 'pl-3.5'} pr-3.5 text-sm outline-none focus:border-brand-magenta focus:ring-2 focus:ring-brand-magenta/15`}
@@ -1195,20 +1249,20 @@ function SourceDetailDrawer({ source: s, onClose, onEdit, onStatusChange }) {
             <DetailStat icon={Users}        label="Total Leads" value={s.leads ?? 0}     color="rose" />
             <DetailStat icon={CheckCircle2} label="Qualified"   value={s.qualified ?? 0} color="purple" />
             <DetailStat icon={Target}       label="Converted"   value={s.converted ?? 0} color="emerald" />
-            <DetailStat icon={DollarSign}   label="CPL"         value={s.cpl ? `$${s.cpl.toFixed(2)}` : '—'} color="amber" />
+            <DetailStat icon={DollarSign}   label="CPL"         value={formatCpl(s.cpl)} color="amber" />
           </div>
 
           <div className="card !p-5 space-y-3">
             <SectionTitle icon={Briefcase} label="Source Information" />
             <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-              <InfoRow icon={Share2}            label="Source"        value={s.source} />
-              <InfoRow icon={Layers}            label="Category"      value={s.category} />
-              <InfoRow icon={Tag}               label="Source Type"   value={s.sourceType || '—'} />
-              <InfoRow icon={Megaphone}         label="Campaign"      value={s.campaign || '—'} />
-              <InfoRow icon={MousePointerClick} label="Landing Page"  value={s.landingPage || '—'} />
-              <InfoRow icon={DollarSign}        label="Budget"        value={s.budget ? formatCurrency(s.budget) : '—'} />
-              <InfoRow icon={Calendar}          label="Created"       value={formatDate(s.createdAt)} />
-              <InfoRow icon={Clock}             label="Last Sync"     value={formatDate(s.lastSync)} />
+              <InfoRow icon={Share2}            label="Source"       value={s.source} />
+              <InfoRow icon={Layers}            label="Category"     value={s.category} />
+              <InfoRow icon={Tag}               label="Source Type"  value={s.sourceType || '—'} />
+              <InfoRow icon={Megaphone}         label="Campaign"     value={s.campaign || '—'} />
+              <InfoRow icon={MousePointerClick} label="Landing Page" value={s.landingPage || '—'} />
+              <InfoRow icon={DollarSign}        label="Budget"       value={s.budget ? formatCurrency(s.budget) : '—'} />
+              <InfoRow icon={Calendar}          label="Created"      value={formatDate(s.createdAt)} />
+              <InfoRow icon={Clock}             label="Last Sync"    value={formatDate(s.lastSync)} />
             </div>
           </div>
 

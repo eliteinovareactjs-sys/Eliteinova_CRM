@@ -11,6 +11,7 @@ import SuperAdminLayout from './components/superadmin/SuperAdminLayout';
 import AdminLayout from './components/admin/AdminLayout';
 import AgentLayout from './components/agent/AgentLayout';
 import MarketingLayout from './components/marketing/MarketingLayout';
+import LeadManagerLayout from './components/leadmanager/LeadManagerLayout';
 
 // ==================== SUPER ADMIN PAGES ====================
 import SuperAdminDashboard from './pages/superadmin/SuperAdminDashboard';
@@ -50,7 +51,6 @@ import AdminTasks from './pages/admin/Tasks';
 import AdminAccount from './pages/admin/Account';
 
 // ==================== AGENT PAGES ====================
-// Imported with "Agent" prefix to avoid name collisions with superadmin pages
 import AgentDashboard from './pages/agent/AgentDashboard';
 import MyLeads from './pages/agent/MyLeads';
 import AgentCalls from './pages/agent/Calls';
@@ -76,6 +76,22 @@ import MarketingTasks from './pages/marketing/MarketingTasks';
 import MarketingCommunication from './pages/marketing/MarketingCommunication';
 import MarketingReports from './pages/marketing/MarketingReports';
 import MarketingAccount from './pages/marketing/MyAccount';
+
+// ==================== LEAD MANAGER PAGES ====================
+import LMDashboard from './pages/leadmanager/LMDashboard';
+import LMLeads from './pages/leadmanager/LMLeads';
+import LMCapture from './pages/leadmanager/LMCapture';
+import LMInbox from './pages/leadmanager/LMInbox';
+import LMAssignment from './pages/leadmanager/LMAssignment';
+import LMCalling from './pages/leadmanager/LMCalling';
+import LMFollowUps from './pages/leadmanager/LMFollowUps';
+import LMQualification from './pages/leadmanager/LMQualification';
+import LMPipeline from './pages/leadmanager/LMPipeline';
+import LMCampaigns from './pages/leadmanager/LMCampaigns';
+import LMReports from './pages/leadmanager/LMReports';
+import LMImportExport from './pages/leadmanager/LMImportExport';
+import LMConfiguration from './pages/leadmanager/LMConfiguration';
+import LMAccount from './pages/leadmanager/LMAccount';
 
 export default function App() {
   return (
@@ -152,8 +168,6 @@ export default function App() {
             }
           >
             <Route index element={<Navigate to="/agent/dashboard" replace />} />
-
-            {/* -------- sidebar 1:1 -------- */}
             <Route path="dashboard"     element={<AgentDashboard />} />
             <Route path="leads"         element={<MyLeads />} />
             <Route path="calls"         element={<AgentCalls />} />
@@ -166,9 +180,9 @@ export default function App() {
             <Route path="search"        element={<AgentSearch />} />
             <Route path="performance"   element={<AgentPerformance />} />
             <Route path="account"       element={<AgentAccount />} />
-
           </Route>
 
+          {/* ==================== MARKETING ==================== */}
           <Route
             path="/marketing"
             element={
@@ -189,6 +203,32 @@ export default function App() {
             <Route path="communication" element={<MarketingCommunication />} />
             <Route path="reports"       element={<MarketingReports />} />
             <Route path="account"       element={<MarketingAccount />} />
+          </Route>
+
+          {/* ==================== LEAD MANAGER ==================== */}
+          <Route
+            path="/leadmanager"
+            element={
+              <ProtectedRoute allow={['leadmanager']}>
+                <LeadManagerLayout />
+              </ProtectedRoute>
+            }
+          >
+            <Route index element={<Navigate to="/leadmanager/dashboard" replace />} />
+            <Route path="dashboard"     element={<LMDashboard />} />
+            <Route path="leads"         element={<LMLeads />} />
+            <Route path="capture"       element={<LMCapture />} />
+            <Route path="inbox"         element={<LMInbox />} />
+            <Route path="assignment"    element={<LMAssignment />} />
+            <Route path="calling"       element={<LMCalling />} />
+            <Route path="followups"     element={<LMFollowUps />} />
+            <Route path="qualification" element={<LMQualification />} />
+            <Route path="pipeline"      element={<LMPipeline />} />
+            <Route path="campaigns"     element={<LMCampaigns />} />
+            <Route path="reports"       element={<LMReports />} />
+            <Route path="import-export" element={<LMImportExport />} />
+            <Route path="config"        element={<LMConfiguration />} />
+            <Route path="account"       element={<LMAccount />} />
           </Route>
 
           <Route path="*" element={<Navigate to="/login" replace />} />

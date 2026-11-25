@@ -70,15 +70,86 @@ const COST_ROW_TONES = {
 /* ═══════════════════════════════════════════════════════════════
    HELPERS
    ═══════════════════════════════════════════════════════════════ */
+const toSafeNumber = (value) => {
+  const number = Number(value);
+
+  return Number.isFinite(number) && number >= 0 ? number : 0;
+};
+
+const normalizeCampaign = (campaign) => {
+  if (
+    !campaign ||
+    typeof campaign !== 'object' ||
+    Array.isArray(campaign) ||
+    !campaign.id ||
+    typeof campaign.name !== 'string' ||
+    !campaign.name.trim()
+  ) {
+    return null;
+  }
+
+  return {
+    ...campaign,
+
+    id: String(campaign.id),
+    name: campaign.name.trim(),
+
+    budget: toSafeNumber(campaign.budget),
+    leads: toSafeNumber(campaign.leads),
+    validLeads: toSafeNumber(campaign.validLeads),
+    contacted: toSafeNumber(campaign.contacted),
+    interested: toSafeNumber(campaign.interested),
+    qualified: toSafeNumber(campaign.qualified),
+    converted: toSafeNumber(campaign.converted),
+    assigned: toSafeNumber(campaign.assigned),
+    followUps: toSafeNumber(campaign.followUps),
+    lost: toSafeNumber(campaign.lost),
+    revenue: toSafeNumber(campaign.revenue),
+
+    sources: Array.isArray(campaign.sources)
+      ? campaign.sources
+          .filter(
+            (source) =>
+              source &&
+              typeof source === 'object' &&
+              !Array.isArray(source) &&
+              typeof source.name === 'string' &&
+              source.name.trim()
+          )
+          .map((source) => ({
+            ...source,
+            name: source.name.trim(),
+            leads: toSafeNumber(source.leads),
+            qualified: toSafeNumber(source.qualified),
+            converted: toSafeNumber(source.converted),
+          }))
+      : [],
+  };
+};
+
 const loadState = (fallback) => {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) return parsed;
-    }
-  } catch { /* ignore */ }
-  return fallback;
+
+    if (raw === null) return fallback;
+
+    const parsed = JSON.parse(raw);
+
+    if (!Array.isArray(parsed)) return fallback;
+
+    // An empty array is valid: it means there are no campaigns.
+    return parsed
+      .map(normalizeCampaign)
+      .filter(Boolean);
+
+  } catch (error) {
+    console.error(
+      'Failed to load campaign performance data:',
+      error
+    );
+
+    return fallback;
+  }
 };
 
 const saveState = (value) => {
@@ -86,14 +157,26 @@ const saveState = (value) => {
 };
 
 /* Whole-rupee formatting for aggregate amounts (budget, revenue, profit) */
-const formatCurrency = (n) => `₹${Number(n || 0).toLocaleString('en-IN')}`;
+const formatCurrency = (n) =>
+  `₹${(Number(n) || 0).toLocaleString('en-IN')}`;
 
-/* Paise-precise formatting for per-unit cost metrics (CPL, CPQL, CPConv) */
 const formatCurrencyPrecise = (n) =>
-  `₹${Number(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  `₹${(Number(n) || 0).toLocaleString('en-IN', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
 
-const formatPercent  = (n) => `${Number(n || 0).toFixed(1)}%`;
-const formatRatio    = (a, b) => (b > 0 ? (a / b) * 100 : 0);
+const formatPercent = (n) =>
+  `${(Number(n) || 0).toFixed(1)}%`;
+
+const formatRatio = (a, b) => {
+  const numerator = Number(a) || 0;
+  const denominator = Number(b) || 0;
+
+  return denominator > 0
+    ? (numerator / denominator) * 100
+    : 0;
+};
 
 /* ═══════════════════════════════════════════════════════════════
    SEED DATA — all values in INR
@@ -151,7 +234,9 @@ const SEED_CAMPAIGNS = [
 export default function CampaignPerformance() {
   const { user: _user } = useAuth(); // reserved for future personalization
 
-  const campaigns = useMemo(() => loadState(SEED_CAMPAIGNS), []);
+  const [campaigns, setCampaigns] = useState(() =>
+    loadState(SEED_CAMPAIGNS)
+  );
   const [activeTab, setActiveTab] = useState('lead');
   const [selectedCampaignId, setSelectedCampaignId] = useState('all');
   const [campaignOpen, setCampaignOpen] = useState(false);
@@ -159,7 +244,7 @@ export default function CampaignPerformance() {
   const [toast, setToast] = useState(null);
   const toastTimerRef = useRef(null);
 
-  useEffect(() => { saveState(campaigns); }, [campaigns]);
+  useEffect(() => {saveState(campaigns);}, [campaigns]);
   useEffect(() => () => { if (toastTimerRef.current) clearTimeout(toastTimerRef.current); }, []);
 
   const showToast = useCallback((msg, type = 'success') => {
@@ -168,10 +253,25 @@ export default function CampaignPerformance() {
     toastTimerRef.current = setTimeout(() => setToast(null), 2400);
   }, []);
 
-  const selectedCampaign = useMemo(
-    () => campaigns.find((c) => c.id === selectedCampaignId) || null,
-    [campaigns, selectedCampaignId]
-  );
+  const selectedCampaign = useMemo(() => {
+  if (selectedCampaignId === 'all') return null;
+
+  return campaigns.find(
+    (campaign) => campaign.id === selectedCampaignId
+  ) || null;
+}, [campaigns, selectedCampaignId]);
+
+// Reset to All Campaigns if the selected campaign no longer exists.
+useEffect(() => {
+  if (
+    selectedCampaignId !== 'all' &&
+    !campaigns.some(
+      (campaign) => campaign.id === selectedCampaignId
+    )
+  ) {
+    setSelectedCampaignId('all');
+  }
+}, [campaigns, selectedCampaignId]);
 
   const scopedCampaigns = useMemo(() => {
     if (selectedCampaignId === 'all') return campaigns;
@@ -179,69 +279,157 @@ export default function CampaignPerformance() {
   }, [campaigns, selectedCampaignId]);
 
   const metrics = useMemo(() => {
-    const list = scopedCampaigns;
-    let budget = 0, leads = 0, validLeads = 0, contacted = 0,
-        interested = 0, qualified = 0, converted = 0, assigned = 0,
-        followUps = 0, lost = 0, revenue = 0;
+  const totals = scopedCampaigns.reduce(
+    (acc, campaign) => {
+      acc.budget += toSafeNumber(campaign.budget);
+      acc.leads += toSafeNumber(campaign.leads);
+      acc.validLeads += toSafeNumber(campaign.validLeads);
+      acc.contacted += toSafeNumber(campaign.contacted);
+      acc.interested += toSafeNumber(campaign.interested);
+      acc.qualified += toSafeNumber(campaign.qualified);
+      acc.converted += toSafeNumber(campaign.converted);
+      acc.assigned += toSafeNumber(campaign.assigned);
+      acc.followUps += toSafeNumber(campaign.followUps);
+      acc.lost += toSafeNumber(campaign.lost);
+      acc.revenue += toSafeNumber(campaign.revenue);
 
-    for (let i = 0; i < list.length; i++) {
-      const c = list[i];
-      budget     += c.budget     || 0;
-      leads      += c.leads      || 0;
-      validLeads += c.validLeads || 0;
-      contacted  += c.contacted  || 0;
-      interested += c.interested || 0;
-      qualified  += c.qualified  || 0;
-      converted  += c.converted  || 0;
-      assigned   += c.assigned   || 0;
-      followUps  += c.followUps  || 0;
-      lost       += c.lost       || 0;
-      revenue    += c.revenue    || 0;
+      return acc;
+    },
+    {
+      budget: 0,
+      leads: 0,
+      validLeads: 0,
+      contacted: 0,
+      interested: 0,
+      qualified: 0,
+      converted: 0,
+      assigned: 0,
+      followUps: 0,
+      lost: 0,
+      revenue: 0,
     }
+  );
 
-    return {
-      budget, leads, validLeads, contacted, interested,
-      qualified, converted, assigned, followUps, lost, revenue,
-      cpl:            leads     > 0 ? budget / leads     : 0,
-      cpql:           qualified > 0 ? budget / qualified : 0,
-      cpConv:         converted > 0 ? budget / converted : 0,
-      conversionRate: formatRatio(converted, leads),
-      roi:            budget > 0 ? ((revenue - budget) / budget) * 100 : 0,
-      profit:         revenue - budget,
-    };
-  }, [scopedCampaigns]);
+  const {
+    budget,
+    leads,
+    validLeads,
+    contacted,
+    interested,
+    qualified,
+    converted,
+    assigned,
+    followUps,
+    lost,
+    revenue,
+  } = totals;
+
+  const profit = revenue - budget;
+
+  return {
+    ...totals,
+
+    cpl: leads > 0 ? budget / leads : 0,
+
+    cpql: qualified > 0
+      ? budget / qualified
+      : 0,
+
+    cpConv: converted > 0
+      ? budget / converted
+      : 0,
+
+    conversionRate: formatRatio(converted, leads),
+
+    roi: budget > 0
+      ? (profit / budget) * 100
+      : 0,
+
+    profit,
+  };
+}, [scopedCampaigns]);
 
   const funnelData = useMemo(() => {
-    const max = Math.max(metrics.leads, 1);
-    return [
-      { stage: 'Leads Generated', value: metrics.leads,      color: '#8B2FD6' },
-      { stage: 'Valid Leads',     value: metrics.validLeads, color: '#6366F1' },
-      { stage: 'Contacted',       value: metrics.contacted,  color: '#E31C79' },
-      { stage: 'Interested',      value: metrics.interested, color: '#EC4899' },
-      { stage: 'Qualified',       value: metrics.qualified,  color: '#F59E0B' },
-      { stage: 'Converted',       value: metrics.converted,  color: '#10B981' },
-    ].map((f) => ({ ...f, pct: Math.round((f.value / max) * 100) }));
-  }, [metrics]);
+  const totalLeads = metrics.leads;
+
+  const stages = [
+    {
+      stage: 'Leads Generated',
+      value: metrics.leads,
+      color: '#8B2FD6',
+    },
+    {
+      stage: 'Valid Leads',
+      value: metrics.validLeads,
+      color: '#6366F1',
+    },
+    {
+      stage: 'Contacted',
+      value: metrics.contacted,
+      color: '#E31C79',
+    },
+    {
+      stage: 'Interested',
+      value: metrics.interested,
+      color: '#EC4899',
+    },
+    {
+      stage: 'Qualified',
+      value: metrics.qualified,
+      color: '#F59E0B',
+    },
+    {
+      stage: 'Converted',
+      value: metrics.converted,
+      color: '#10B981',
+    },
+  ];
+
+  return stages.map((stage) => ({
+    ...stage,
+
+    pct: totalLeads > 0
+      ? Math.min(
+          100,
+          Math.round((stage.value / totalLeads) * 100)
+        )
+      : 0,
+  }));
+}, [metrics]);
 
   const sourceAggregation = useMemo(() => {
-    const map = new Map();
-    for (const c of scopedCampaigns) {
-      const srcs = c.sources || [];
-      for (const s of srcs) {
-        const leads     = s.leads     || 0;
-        const qualified = s.qualified || 0;
-        const converted = s.converted || 0;
-        const existing = map.get(s.name);
-        if (existing) {
-          existing.leads     += leads;
-          existing.qualified += qualified;
-          existing.converted += converted;
-        } else {
-          map.set(s.name, { name: s.name, leads, qualified, converted });
-        }
+    const sourceMap = new Map();
+
+    for (const campaign of scopedCampaigns) {
+      const sources = Array.isArray(campaign.sources)
+        ? campaign.sources
+        : [];
+
+      for (const source of sources) {
+        if (!source?.name) continue;
+
+        const name = source.name.trim();
+
+        if (!name) continue;
+
+        const existing = sourceMap.get(name) || {
+          name,
+          leads: 0,
+          qualified: 0,
+          converted: 0,
+        };
+
+        existing.leads += toSafeNumber(source.leads);
+        existing.qualified += toSafeNumber(source.qualified);
+        existing.converted += toSafeNumber(source.converted);
+
+        sourceMap.set(name, existing);
       }
     }
-    return [...map.values()].sort((a, b) => b.leads - a.leads);
+
+    return Array.from(sourceMap.values()).sort(
+      (a, b) => b.leads - a.leads
+    );
   }, [scopedCampaigns]);
 
   const kpis = useMemo(() => ([
@@ -277,12 +465,12 @@ export default function CampaignPerformance() {
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            <button
+            {/* <button
               onClick={handleExport}
               className="group inline-flex items-center gap-2 rounded-full border border-brand-lilac bg-white px-4 py-2 text-xs font-semibold text-brand-ink shadow-sm transition-all hover:-translate-y-0.5 hover:border-brand-magenta/40 hover:shadow-md"
             >
               <Download size={14} className="transition-transform group-hover:translate-y-0.5" /> Export Report
-            </button>
+            </button> */}
 
             <CampaignSelector
               campaigns={campaigns}
@@ -571,7 +759,10 @@ const SourceTab = memo(function SourceTab({ sourceAggregation, metrics }) {
                   <div className="mt-3 h-2 overflow-hidden rounded-full bg-brand-lilac">
                     <div
                       className="h-full rounded-full transition-all duration-1000"
-                      style={{ width: `${pct}%`, background: CHART_COLORS[i % CHART_COLORS.length] }}
+                      style={{
+                        width: `${Math.min(Math.max(pct, 0), 100)}%`,
+                        background: CHART_COLORS[i % CHART_COLORS.length],
+                      }}
                     />
                   </div>
                   <p className="mt-2 flex items-center gap-1 font-mono text-[10px] text-emerald-600">

@@ -290,7 +290,7 @@ export default function MarketingTopbar({ onMenuClick }) {
                 <div className="p-1">
                   {[
                     { icon: User, label: 'My Account', to: '/marketing/account' },
-                    { icon: Settings, label: 'Preferences', to: '/marketing/account' },
+                    // { icon: Settings, label: 'Preferences', to: '/marketing/account' },
                   ].map(({ icon: Icon, label, to }) => (
                     <button
                       key={label}
