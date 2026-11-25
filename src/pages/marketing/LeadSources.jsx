@@ -1,7 +1,7 @@
 // src/pages/marketing/LeadSources.jsx
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Plus, Search, Filter, ChevronDown, Eye, Pencil, Trash2, Copy,
+  Plus, Search, Filter, ChevronDown, Eye, Pencil, Trash2,
   AlertCircle, CheckCircle2, X, Users, Clock, Zap, Target, Calendar,
   Globe, Briefcase, Tag, Layers, Inbox, Download, Grid3x3, List,
   Activity, DollarSign, Megaphone, MousePointerClick, BarChart3, Share2,
@@ -287,20 +287,6 @@ export default function LeadSources() {
     showToast('Source deleted', 'error');
   };
 
-  const handleDuplicate = (source) => {
-    const copy = normalizeSource({
-      ...source,
-      id: uid('src'),
-      source: `${source.source} (Copy)`,
-      leads: 0, qualified: 0, converted: 0,
-      status: 'Draft',
-      lastSync: new Date().toISOString(),
-      createdAt: new Date().toISOString(),
-    });
-    setSources((prev) => [copy, ...prev]);
-    showToast('Source duplicated');
-  };
-
   const handleStatusChange = (id, newStatus) => {
     const target = sources.find((s) => s.id === id);
     if (target && target.status === newStatus) return;
@@ -568,7 +554,6 @@ export default function LeadSources() {
                         <RowActions
                           onView={() => openView(s)}
                           onEdit={() => openEdit(s)}
-                          onDuplicate={() => handleDuplicate(s)}
                           onDelete={() => openDelete(s)}
                         />
                       </td>
@@ -840,7 +825,7 @@ function SourceCard({ source: s, onView, onEdit, onDelete }) {
 /* ═══════════════════════════════════════════════════════════════
    ROW ACTIONS (table) — View · Edit · Duplicate · Delete
    ═══════════════════════════════════════════════════════════════ */
-function RowActions({ onView, onEdit, onDuplicate, onDelete }) {
+function RowActions({ onView, onEdit, onDelete }) {
   const base = 'inline-flex h-7 w-7 items-center justify-center rounded-lg border transition-all';
   return (
     <div className="flex items-center justify-center gap-1">
@@ -859,14 +844,6 @@ function RowActions({ onView, onEdit, onDuplicate, onDelete }) {
         className={`${base} border-transparent bg-gradient-to-r from-brand-magenta to-brand-purple text-white shadow-card hover:brightness-110`}
       >
         <Pencil size={12} />
-      </button>
-      <button
-        onClick={onDuplicate}
-        title="Duplicate source"
-        aria-label="Duplicate source"
-        className={`${base} border-brand-lilac bg-white text-brand-ink hover:border-brand-magenta/40 hover:bg-brand-magenta/5 hover:text-brand-magenta`}
-      >
-        <Copy size={12} />
       </button>
       <button
         onClick={onDelete}
