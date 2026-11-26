@@ -17,7 +17,7 @@ export default function LeadManagerQuickActions() {
 
       <div className="card !p-10 flex flex-col items-center justify-center text-center">
         <p className="text-brand-ink/50">
-          Lead Manager Quick Actions page is under construction.
+          Lead Manager Quick Actions page is coming soon.
         </p>
       </div>
     </div>

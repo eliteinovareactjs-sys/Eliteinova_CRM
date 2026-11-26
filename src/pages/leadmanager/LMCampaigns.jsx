@@ -12,7 +12,7 @@ export default function LMCampaigns() {
         </div>
       </div>
       <div className="card !p-10 flex flex-col items-center justify-center text-center">
-        <p className="text-brand-ink/50">This page is under construction.</p>
+        <p className="text-brand-ink/50">This page is coming soon.</p>
       </div>
     </div>
   );

@@ -17,7 +17,7 @@ export default function LeadProfile() {
 
       <div className="card !p-10 flex flex-col items-center justify-center text-center">
         <p className="text-brand-ink/50">
-          Lead Profile page is under construction.
+          Lead Profile page is coming soon.
         </p>
       </div>
     </div>

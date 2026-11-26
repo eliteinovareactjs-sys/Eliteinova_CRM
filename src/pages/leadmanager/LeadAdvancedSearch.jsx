@@ -17,7 +17,7 @@ export default function LeadAdvancedSearch() {
 
       <div className="card !p-10 flex flex-col items-center justify-center text-center">
         <p className="text-brand-ink/50">
-          Lead Search & Advanced Filters page is under construction.
+          Lead Search & Advanced Filters page is coming soon.
         </p>
       </div>
     </div>

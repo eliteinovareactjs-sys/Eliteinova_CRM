@@ -17,7 +17,7 @@ export default function DuplicateDataValidation() {
 
       <div className="card !p-10 flex flex-col items-center justify-center text-center">
         <p className="text-brand-ink/50">
-          Duplicate & Data Validation page is under construction.
+          Duplicate & Data Validation page is coming soon.
         </p>
       </div>
     </div>

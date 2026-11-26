@@ -17,7 +17,7 @@ export default function LeadTagsCategories() {
 
       <div className="card !p-10 flex flex-col items-center justify-center text-center">
         <p className="text-brand-ink/50">
-          Lead Tags & Categories page is under construction.
+          Lead Tags & Categories page is coming soon.
         </p>
       </div>
     </div>
