@@ -1,0 +1,25 @@
+import { Workflow } from 'lucide-react';
+
+export default function LeadAutomation() {
+  return (
+    <div className="space-y-5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h1 className="font-display text-xl font-semibold text-brand-ink">
+            Lead Automation
+          </h1>
+          <p className="flex items-center gap-1.5 text-sm text-brand-ink/50">
+            <Workflow size={13} className="text-brand-magenta" />
+            Automate lead assignment, follow-ups and lead management workflows
+          </p>
+        </div>
+      </div>
+
+      <div className="card !p-10 flex flex-col items-center justify-center text-center">
+        <p className="text-brand-ink/50">
+          Lead Automation page is under construction.
+        </p>
+      </div>
+    </div>
+  );
+}

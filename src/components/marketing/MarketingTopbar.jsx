@@ -5,6 +5,7 @@ import {
   Menu, Bell, ChevronDown, LogOut, Search, Settings, User,
   Building2, AlertTriangle, Phone, Users, Megaphone, FileText,
   Target, Command, Zap, Bookmark, BarChart3, Share2, Globe,
+  BadgeCheck, Wallet, Filter,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 
@@ -62,7 +63,10 @@ export default function MarketingTopbar({ onMenuClick }) {
   const searchResults = [
     { icon: Building2, label: 'Dashboard', to: '/marketing/dashboard' },
     { icon: Megaphone, label: 'Campaigns', to: '/marketing/campaigns' },
+    { icon: Wallet, label: 'Budget & Cost Tracking', to: '/marketing/budget' },
+    { icon: Filter, label: 'Marketing Funnel', to: '/marketing/funnel' },
     { icon: Target, label: 'Lead Generation', to: '/marketing/leads' },
+    { icon: BadgeCheck, label: 'Lead Quality Management', to: '/marketing/lead-quality' },
     { icon: Share2, label: 'Lead Sources', to: '/marketing/sources' },
     { icon: Users, label: 'Lead Handover', to: '/marketing/handover' },
     { icon: Globe, label: 'Social Media', to: '/marketing/social-media' },

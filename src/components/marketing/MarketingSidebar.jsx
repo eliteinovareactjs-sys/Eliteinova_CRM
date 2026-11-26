@@ -3,6 +3,7 @@ import { NavLink } from 'react-router-dom';
 import {
   LayoutDashboard, Megaphone, Target, Share2, Globe, BarChart3,
   Users, CheckSquare, MessageSquare, FileText, User, Building2,
+  BadgeCheck, Wallet, Filter,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 
@@ -13,16 +14,19 @@ const NAV_GROUPS = [
       { to: '/marketing/dashboard', label: 'Dashboard', icon: LayoutDashboard },
     ],
   },
-  {
+ {
     label: 'Campaigns',
     items: [
       { to: '/marketing/campaigns', label: 'Marketing Campaigns', icon: Megaphone },
+      { to: '/marketing/budget', label: 'Budget & Cost Tracking', icon: Wallet },
+      { to: '/marketing/funnel', label: 'Marketing Funnel', icon: Filter },
     ],
   },
   {
     label: 'Lead Generation',
     items: [
       { to: '/marketing/leads', label: 'All Marketing Leads', icon: Target },
+      { to: '/marketing/lead-quality', label: 'Lead Quality Management', icon: BadgeCheck },
       { to: '/marketing/sources', label: 'Lead Sources', icon: Share2 },
     ],
   },

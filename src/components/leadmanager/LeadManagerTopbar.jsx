@@ -5,7 +5,7 @@ import {
   Menu, Bell, ChevronDown, LogOut, Search, Settings, User,
   Building2, AlertTriangle, Phone, Users, Megaphone, FileText,
   Target, Command, Bookmark, BarChart3, Inbox, CheckSquare,
-  UserCheck // <-- Added missing import
+  UserCheck, UserRound, Tags, ShieldCheck, Workflow, Zap
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 
@@ -63,6 +63,12 @@ export default function LeadManagerTopbar({ onMenuClick }) {
     { icon: Phone, label: 'Lead Calling', to: '/leadmanager/calling' },
     { icon: CheckSquare, label: 'Follow-ups', to: '/leadmanager/followups' },
     { icon: BarChart3, label: 'Lead Reports', to: '/leadmanager/reports' },
+    { icon: UserRound, label: 'Lead Profile', to: '/leadmanager/lead-profile' },
+    { icon: Tags, label: 'Tags & Categories', to: '/leadmanager/tags-categories' },
+    { icon: ShieldCheck, label: 'Duplicate & Validation', to: '/leadmanager/duplicate-validation' },
+    { icon: Search, label: 'Advanced Search', to: '/leadmanager/advanced-search' },
+    { icon: Workflow, label: 'Lead Automation', to: '/leadmanager/automation' },
+    { icon: Zap, label: 'Quick Actions', to: '/leadmanager/quick-actions' },
   ];
 
   const handleSignOut = () => {

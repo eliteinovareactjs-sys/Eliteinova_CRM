@@ -3,7 +3,8 @@ import { NavLink } from 'react-router-dom';
 import {
   LayoutDashboard, Users, PlusCircle, Inbox, UserCheck,
   Phone, Calendar, Star, GitPullRequest, Megaphone,
-  BarChart3, Import, Settings, Globe, X
+  BarChart3, Import, Settings, Globe, X,
+  UserRound, Tags, ShieldCheck, Search, Workflow, Zap,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 
@@ -68,6 +69,27 @@ const NAV_GROUPS = [
       { to: '/leadmanager/campaigns', label: 'Campaign Leads', icon: Megaphone },
     ],
   },
+  {
+  label: 'Lead Organization',
+  items: [
+    { to: '/leadmanager/lead-profile', label: 'Lead Profile', icon: UserRound },
+    { to: '/leadmanager/tags-categories', label: 'Tags & Categories', icon: Tags },
+  ],
+},
+{
+  label: 'Lead Quality & Search',
+  items: [
+    { to: '/leadmanager/duplicate-validation', label: 'Duplicate & Validation', icon: ShieldCheck },
+    { to: '/leadmanager/advanced-search', label: 'Advanced Search', icon: Search },
+  ],
+},
+{
+  label: 'Lead Automation & Tools',
+  items: [
+    { to: '/leadmanager/automation', label: 'Lead Automation', icon: Workflow },
+    { to: '/leadmanager/quick-actions', label: 'Quick Actions', icon: Zap },
+  ],
+},
   {
     label: 'Reports',
     items: [

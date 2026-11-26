@@ -76,6 +76,9 @@ import MarketingTasks from './pages/marketing/MarketingTasks';
 import MarketingCommunication from './pages/marketing/MarketingCommunication';
 import MarketingReports from './pages/marketing/MarketingReports';
 import MarketingAccount from './pages/marketing/MyAccount';
+import MarketingLeadQualityManagement from './pages/marketing/LeadQualityManagement';
+import MarketingBudgetCostTracking from './pages/marketing/BudgetCostTracking';
+import MarketingFunnel from './pages/marketing/MarketingFunnel';
 
 // ==================== LEAD MANAGER PAGES ====================
 import LMDashboard from './pages/leadmanager/LMDashboard';
@@ -92,6 +95,12 @@ import LMReports from './pages/leadmanager/LMReports';
 import LMImportExport from './pages/leadmanager/LMImportExport';
 import LMConfiguration from './pages/leadmanager/LMConfiguration';
 import LMAccount from './pages/leadmanager/LMAccount';
+import LeadProfile from './pages/leadmanager/LeadProfile';
+import LeadTagsCategories from './pages/leadmanager/LeadTagsCategories';
+import DuplicateDataValidation from './pages/leadmanager/DuplicateDataValidation';
+import LeadAdvancedSearch from './pages/leadmanager/LeadAdvancedSearch';
+import LeadAutomation from './pages/leadmanager/LeadAutomation';
+import LeadManagerQuickActions from './pages/leadmanager/LeadManagerQuickActions';
 
 export default function App() {
   return (
@@ -194,7 +203,10 @@ export default function App() {
             <Route index element={<Navigate to="/marketing/dashboard" replace />} />
             <Route path="dashboard"     element={<MarketingDashboard />} />
             <Route path="campaigns"     element={<MarketingCampaigns />} />
+            <Route path="budget"        element={<MarketingBudgetCostTracking />} />
+            <Route path="funnel"        element={<MarketingFunnel />} />
             <Route path="leads"         element={<MarketingLeadGeneration />} />
+            <Route path="lead-quality"  element={<MarketingLeadQualityManagement />} />
             <Route path="sources"       element={<MarketingLeadSources />} />
             <Route path="handover"      element={<MarketingLeadHandover />} />
             <Route path="social-media"  element={<MarketingSocialMedia />} />
@@ -229,6 +241,12 @@ export default function App() {
             <Route path="import-export" element={<LMImportExport />} />
             <Route path="config"        element={<LMConfiguration />} />
             <Route path="account"       element={<LMAccount />} />
+            <Route path="lead-profile"        element={<LeadProfile />} />
+            <Route path="tags-categories"     element={<LeadTagsCategories />} />
+            <Route path="duplicate-validation" element={<DuplicateDataValidation />} />
+            <Route path="advanced-search"      element={<LeadAdvancedSearch />} />
+            <Route path="automation"           element={<LeadAutomation />} />
+            <Route path="quick-actions"        element={<LeadManagerQuickActions />} />
           </Route>
 
           <Route path="*" element={<Navigate to="/login" replace />} />
