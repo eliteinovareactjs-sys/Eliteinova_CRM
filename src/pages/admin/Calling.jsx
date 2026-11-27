@@ -9,6 +9,7 @@ import {
   SkipForward, Radio, ListChecks, Megaphone, CalendarClock, Repeat,
   PhoneOff, Target, BarChart3, XCircle, CircleDot, FileText, Volume2,
   VolumeX, RotateCcw, Clock3, MessageSquare, ClipboardList, PhoneForwarded,
+  List, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { CALLS as INITIAL_CALLS, AGENTS, LEADS } from '../../data/mockData';
@@ -44,6 +45,7 @@ const DISPOSITION_COLORS = {
 };
 
 const STORAGE_PREFIX = 'calling:';
+const PAGE_SIZE_OPTIONS = [10, 25, 50];
 
 /* ✅ FIX: extracted so both the modal and helpers share the same list */
 const DISPOSITION_OPTIONS = [
@@ -112,6 +114,105 @@ const formatRelative = (iso) => {
 
 const initials = (name) =>
   (name || '?').split(' ').map((n) => n[0]).slice(0, 2).join('').toUpperCase();
+
+/* Lock background page scroll while a drawer/modal is open */
+function useLockBodyScroll() {
+  useEffect(() => {
+    const scrollY = window.scrollY;
+    const prevBody = document.body.style.overflow;
+    const prevHtml = document.documentElement.style.overflow;
+    document.body.style.overflow = 'hidden';
+    document.documentElement.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = prevBody;
+      document.documentElement.style.overflow = prevHtml;
+      window.scrollTo(0, scrollY);
+    };
+  }, []);
+}
+
+/* Page numbers with ellipsis, e.g. [1, '…', 4, 5, 6, '…', 12] */
+function getPageNumbers(current, total) {
+  if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
+  const pages = new Set([1, total, current - 1, current, current + 1]);
+  const sorted = [...pages].filter((p) => p >= 1 && p <= total).sort((a, b) => a - b);
+  const out = [];
+  sorted.forEach((p, i) => {
+    if (i > 0 && p - sorted[i - 1] > 1) out.push('…');
+    out.push(p);
+  });
+  return out;
+}
+
+/* Shared pagination state: resets to page 1 when resetKey or page size changes */
+function usePagination(items, resetKey) {
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(PAGE_SIZE_OPTIONS[0]);
+
+  useEffect(() => { setPage(1); }, [resetKey, pageSize]);
+
+  const total = items.length;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const safePage = Math.min(page, totalPages);
+  const startIdx = (safePage - 1) * pageSize;
+  const endIdx = Math.min(safePage * pageSize, total);
+  const pageItems = items.slice(startIdx, startIdx + pageSize);
+
+  return { pageItems, page: safePage, setPage, pageSize, setPageSize, total, totalPages, startIdx, endIdx };
+}
+
+function Pagination({ startIdx, endIdx, total, totalPages, page, setPage, label = 'items' }) {
+  if (total === 0) return null;
+  const navBtn =
+    'flex h-8 w-8 items-center justify-center rounded-lg border border-brand-lilac bg-white text-brand-ink/60 transition-all hover:border-brand-magenta/40 hover:text-brand-magenta disabled:cursor-not-allowed disabled:opacity-40';
+
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-brand-lilac bg-white px-4 py-3 shadow-[0_4px_16px_-8px_rgba(139,47,214,0.15)]">
+      <p className="text-xs text-brand-ink/60">
+        Showing <span className="font-bold text-brand-ink">{startIdx + 1}–{endIdx}</span> of{' '}
+        <span className="font-bold text-brand-magenta">{total}</span> {label}
+      </p>
+
+      {totalPages > 1 && (
+        <nav aria-label="Pagination" className="flex items-center gap-1">
+          <button type="button" onClick={() => setPage(1)} disabled={page === 1} aria-label="First page" className={navBtn}>
+            <ChevronsLeft size={14} />
+          </button>
+          <button type="button" onClick={() => setPage(Math.max(1, page - 1))} disabled={page === 1} aria-label="Previous page" className={navBtn}>
+            <ChevronLeft size={14} />
+          </button>
+
+          {getPageNumbers(page, totalPages).map((p, i) =>
+            p === '…' ? (
+              <span key={`dots-${i}`} className="px-1.5 text-xs font-bold text-brand-ink/40">…</span>
+            ) : (
+              <button
+                key={p}
+                type="button"
+                onClick={() => setPage(p)}
+                aria-current={p === page ? 'page' : undefined}
+                className={`h-8 min-w-[32px] rounded-lg px-2 text-xs font-bold transition-all ${
+                  p === page
+                    ? 'bg-gradient-to-r from-brand-magenta to-brand-purple text-white shadow-[0_4px_14px_-4px_rgba(227,28,121,0.5)]'
+                    : 'border border-brand-lilac bg-white text-brand-ink/70 hover:border-brand-magenta/40 hover:text-brand-magenta'
+                }`}
+              >
+                {p}
+              </button>
+            )
+          )}
+
+          <button type="button" onClick={() => setPage(Math.min(totalPages, page + 1))} disabled={page === totalPages} aria-label="Next page" className={navBtn}>
+            <ChevronRight size={14} />
+          </button>
+          <button type="button" onClick={() => setPage(totalPages)} disabled={page === totalPages} aria-label="Last page" className={navBtn}>
+            <ChevronsRight size={14} />
+          </button>
+        </nav>
+      )}
+    </div>
+  );
+}
 
 /* ✅ FIX: robust callback detection */
 const isCallback = (s) => s.kind === 'callback' || /callback/i.test(s.reason || '');
@@ -418,7 +519,7 @@ export default function Calling() {
       <div className="pointer-events-none absolute -top-32 -right-32 h-96 w-96 rounded-full bg-brand-magenta/[0.05] blur-3xl" />
       <div className="pointer-events-none absolute top-1/2 -left-32 h-80 w-80 rounded-full bg-brand-purple/[0.05] blur-3xl" />
 
-      <div className="relative space-y-5 px-1 py-1">
+      <div className="relative space-y-5 px-1 py-1 pb-16">
         {/* ═══ HEADER ═══ */}
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
@@ -738,6 +839,9 @@ function CallsListTab({
   showToast,
 }) {
   const [menuOpenId, setMenuOpenId] = useState(null);
+  const [rowsOpen, setRowsOpen] = useState(false);
+
+  const pg = usePagination(calls, `${statusFilter}|${agentFilter}|${searchQuery}|${calls.length}`);
 
   return (
     <div className="space-y-4">
@@ -759,14 +863,20 @@ function CallsListTab({
 
         <DropdownFilter label="Status" icon={Filter} value={statusFilter} options={['All', 'Connected', 'Missed', 'Failed', 'Abandoned']}
           open={statusOpen}
-          onToggle={() => { setStatusOpen((s) => !s); setAgentOpen(false); }}
+          onToggle={() => { setStatusOpen((s) => !s); setAgentOpen(false); setRowsOpen(false); }}
           onChange={(v) => { setStatusFilter(v); setStatusOpen(false); }}
         />
 
         <DropdownFilter label="Agent" icon={Users} value={agentFilter} options={['All', ...agents.map((a) => a.name)]}
           open={agentOpen}
-          onToggle={() => { setAgentOpen((s) => !s); setStatusOpen(false); }}
+          onToggle={() => { setAgentOpen((s) => !s); setStatusOpen(false); setRowsOpen(false); }}
           onChange={(v) => { setAgentFilter(v); setAgentOpen(false); }}
+        />
+
+        <DropdownFilter label="Rows" icon={List} value={String(pg.pageSize)} options={PAGE_SIZE_OPTIONS.map(String)}
+          open={rowsOpen}
+          onToggle={() => { setRowsOpen((s) => !s); setStatusOpen(false); setAgentOpen(false); }}
+          onChange={(v) => { pg.setPageSize(Number(v)); setRowsOpen(false); }}
         />
 
         {hasFilters && (
@@ -780,7 +890,7 @@ function CallsListTab({
         <EmptyState hasFilters={hasFilters} onClear={onClearFilters} />
       ) : (
         <div className="space-y-2">
-          {calls.map((call) => (
+          {pg.pageItems.map((call) => (
             <CallRow
               key={call.id}
               call={call}
@@ -798,6 +908,16 @@ function CallsListTab({
           ))}
         </div>
       )}
+
+      <Pagination
+        startIdx={pg.startIdx}
+        endIdx={pg.endIdx}
+        total={pg.total}
+        totalPages={pg.totalPages}
+        page={pg.page}
+        setPage={pg.setPage}
+        label="calls"
+      />
     </div>
   );
 }
@@ -1207,15 +1327,25 @@ function RecordingsTab({ calls, onPlay }) {
     return calls.filter((c) => `${c.customer} ${c.mobile} ${c.agent}`.toLowerCase().includes(q));
   }, [calls, search]);
 
+  const [rowsOpen, setRowsOpen] = useState(false);
+  const pg = usePagination(filtered, `${search}|${filtered.length}`);
+
   return (
     <div className="space-y-4">
-      <div className="relative">
-        <Search size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-brand-ink/40" />
-        <input
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search recordings by customer, mobile, or agent…"
-          className="w-full rounded-full border border-brand-lilac bg-white py-2.5 pl-11 pr-10 text-sm outline-none focus:border-brand-magenta focus:ring-2 focus:ring-brand-magenta/15"
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="relative min-w-[220px] flex-1">
+          <Search size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-brand-ink/40" />
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search recordings by customer, mobile, or agent…"
+            className="w-full rounded-full border border-brand-lilac bg-white py-2.5 pl-11 pr-10 text-sm outline-none focus:border-brand-magenta focus:ring-2 focus:ring-brand-magenta/15"
+          />
+        </div>
+        <DropdownFilter label="Rows" icon={List} value={String(pg.pageSize)} options={PAGE_SIZE_OPTIONS.map(String)}
+          open={rowsOpen}
+          onToggle={() => setRowsOpen((s) => !s)}
+          onChange={(v) => { pg.setPageSize(Number(v)); setRowsOpen(false); }}
         />
       </div>
 
@@ -1231,7 +1361,7 @@ function RecordingsTab({ calls, onPlay }) {
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {filtered.map((call) => (
+          {pg.pageItems.map((call) => (
             <div key={call.id} className="card">
               <div className="flex items-center gap-3">
                 <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-brand-magenta to-brand-purple text-xs font-bold text-white">
@@ -1268,6 +1398,16 @@ function RecordingsTab({ calls, onPlay }) {
           ))}
         </div>
       )}
+
+      <Pagination
+        startIdx={pg.startIdx}
+        endIdx={pg.endIdx}
+        total={pg.total}
+        totalPages={pg.totalPages}
+        page={pg.page}
+        setPage={pg.setPage}
+        label="recordings"
+      />
     </div>
   );
 }
@@ -1399,13 +1539,14 @@ function AgentWiseTab({ breakdown, onViewCalls }) {
    CALL DETAILS DRAWER
    ═══════════════════════════════════════════════════════════════ */
 function CallDetailsDrawer({ call, onClose, onPlay, onCopy, onNote, onDisposition, onCallback, onAddToQueue, onDelete }) {
+  useLockBodyScroll();
   const isConnected = call.status === 'connected';
   const isMissed = call.status === 'missed';
   const isAbandoned = call.status === 'abandoned';
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end bg-black/40 backdrop-blur-sm">
-      <div className="h-full w-full max-w-lg overflow-y-auto bg-white shadow-panel animate-slide-in-right">
+    <div className="fixed inset-0 z-50 flex justify-end overflow-hidden bg-black/40 backdrop-blur-sm">
+      <div className="h-full w-full max-w-lg overflow-y-auto overscroll-contain bg-white shadow-panel animate-slide-in-right">
         <div className="sticky top-0 z-10 flex items-center justify-between gap-3 border-b border-brand-lilac bg-gradient-to-r from-brand-mist/60 to-white px-6 py-4 backdrop-blur-sm">
           <div className="flex items-center gap-3">
             <div className={`flex h-12 w-12 items-center justify-center rounded-xl text-white ${
@@ -1548,6 +1689,7 @@ function CallDetailsDrawer({ call, onClose, onPlay, onCopy, onNote, onDispositio
    RECORDING MODAL — with animated progress
    ═══════════════════════════════════════════════════════════════ */
 function RecordingModal({ call, name, onClose }) {
+  useLockBodyScroll();
   const [playing, setPlaying] = useState(true);
   const [muted, setMuted] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -1869,6 +2011,7 @@ function DropdownFilter({ label, icon: Icon, value, options, open, onToggle, onC
 }
 
 function ModalShell({ title, subtitle, children, onClose }) {
+  useLockBodyScroll();
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm">
       <div className="w-full max-w-lg overflow-hidden rounded-2xl bg-white shadow-panel">
@@ -1974,6 +2117,7 @@ function EmptyState({ hasFilters, onClear, message }) {
 }
 
 function ConfirmDialog({ title, message, confirmLabel, onCancel, onConfirm }) {
+  useLockBodyScroll();
   return (
     <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm">
       <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-panel">

@@ -6,6 +6,7 @@ import {
   Target, Calendar, Globe, MapPin, Mail, Phone, Briefcase, UserPlus,
   Flame, Inbox, Download, Grid3x3, List, Activity, User, Star,
   MessageSquare, Megaphone, MousePointerClick,
+  ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 
@@ -88,6 +89,7 @@ const SOURCE_ICONS = {
 };
 
 const STORAGE_KEY = 'leads:marketing';
+const PAGE_SIZE_OPTIONS = [10, 25, 50];
 const LEAD_COUNTER_KEY = 'leads:marketing:counter';
 const LEAD_COUNTER_BASE = 1034; // seeds end at L-1034; next is L-1035
 
@@ -193,6 +195,35 @@ const formatShortDate = (val) => {
   return d ? d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) : '—';
 };
 
+/* Lock background page scroll while a drawer/modal is open */
+function useLockBodyScroll() {
+  useEffect(() => {
+    const scrollY = window.scrollY;
+    const prevBody = document.body.style.overflow;
+    const prevHtml = document.documentElement.style.overflow;
+    document.body.style.overflow = 'hidden';
+    document.documentElement.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = prevBody;
+      document.documentElement.style.overflow = prevHtml;
+      window.scrollTo(0, scrollY);
+    };
+  }, []);
+}
+
+/* Page numbers with ellipsis, e.g. [1, '…', 4, 5, 6, '…', 12] */
+function getPageNumbers(current, total) {
+  if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
+  const pages = new Set([1, total, current - 1, current, current + 1]);
+  const sorted = [...pages].filter((p) => p >= 1 && p <= total).sort((a, b) => a - b);
+  const out = [];
+  sorted.forEach((p, i) => {
+    if (i > 0 && p - sorted[i - 1] > 1) out.push('…');
+    out.push(p);
+  });
+  return out;
+}
+
 /* Escape-key hook */
 function useEscape(enabled, handler) {
   const handlerRef = useRef(handler);
@@ -238,7 +269,10 @@ export default function LeadGeneration() {
   const [statusOpen, setStatusOpen] = useState(false);
   const [campaignFilter, setCampaignFilter] = useState('All');
   const [campaignOpen, setCampaignOpen] = useState(false);
+  const [rowsOpen, setRowsOpen] = useState(false);
   const [viewMode, setViewMode] = useState('list');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(PAGE_SIZE_OPTIONS[0]);
   const [toast, setToast] = useState(null);
 
   const [showModal, setShowModal] = useState(false);
@@ -318,6 +352,16 @@ export default function LeadGeneration() {
 
     return list.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
   }, [leads, activeTab, sourceFilter, statusFilter, campaignFilter, searchQuery]);
+
+  /* ── PAGINATION ── */
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const safePage = Math.min(page, totalPages);
+  const startIdx = (safePage - 1) * pageSize;
+  const endIdx = Math.min(safePage * pageSize, filtered.length);
+  const pageRows = filtered.slice(startIdx, startIdx + pageSize);
+  const progressPct = filtered.length ? Math.round((endIdx / filtered.length) * 100) : 0;
+
+  useEffect(() => { setPage(1); }, [activeTab, sourceFilter, statusFilter, campaignFilter, searchQuery, pageSize]);
 
   const summary = useMemo(() => ({
     total:     leads.length,
@@ -484,8 +528,8 @@ export default function LeadGeneration() {
         </div>
 
         {/* FILTER BAR */}
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="relative min-w-[220px] flex-1">
+        <div className="flex flex-wrap items-center gap-2 xl:flex-nowrap">
+          <div className="relative min-w-[160px] flex-1">
             <Search size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-brand-ink/40" />
             <input
               value={searchQuery}
@@ -504,7 +548,7 @@ export default function LeadGeneration() {
             label="Source" icon={Globe} value={sourceFilter}
             options={['All', ...LEAD_SOURCES]}
             open={sourceOpen}
-            onToggle={() => { setSourceOpen((s) => !s); setStatusOpen(false); setCampaignOpen(false); }}
+            onToggle={() => { setSourceOpen((s) => !s); setStatusOpen(false); setCampaignOpen(false); setRowsOpen(false); }}
             onChange={(v) => { setSourceFilter(v); setSourceOpen(false); }}
           />
 
@@ -512,7 +556,7 @@ export default function LeadGeneration() {
             label="Status" icon={Filter} value={statusFilter}
             options={['All', ...LEAD_STATUSES]}
             open={statusOpen}
-            onToggle={() => { setStatusOpen((s) => !s); setSourceOpen(false); setCampaignOpen(false); }}
+            onToggle={() => { setStatusOpen((s) => !s); setSourceOpen(false); setCampaignOpen(false); setRowsOpen(false); }}
             onChange={(v) => {
               setStatusFilter(v);
               setStatusOpen(false);
@@ -524,8 +568,16 @@ export default function LeadGeneration() {
             label="Campaign" icon={Megaphone} value={campaignFilter}
             options={campaignOptions}
             open={campaignOpen}
-            onToggle={() => { setCampaignOpen((s) => !s); setSourceOpen(false); setStatusOpen(false); }}
+            onToggle={() => { setCampaignOpen((s) => !s); setSourceOpen(false); setStatusOpen(false); setRowsOpen(false); }}
             onChange={(v) => { setCampaignFilter(v); setCampaignOpen(false); }}
+          />
+
+          <DropdownFilter
+            label="Rows" icon={List} value={String(pageSize)}
+            options={PAGE_SIZE_OPTIONS.map(String)}
+            open={rowsOpen}
+            onToggle={() => { setRowsOpen((s) => !s); setSourceOpen(false); setStatusOpen(false); setCampaignOpen(false); }}
+            onChange={(v) => { setPageSize(Number(v)); setRowsOpen(false); }}
           />
 
           {hasFilters && (
@@ -537,7 +589,7 @@ export default function LeadGeneration() {
             </button>
           )}
 
-          <span className="inline-flex items-center gap-2 rounded-full border border-brand-lilac bg-white px-4 py-2.5 text-sm font-semibold text-brand-ink">
+          <span className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border border-brand-lilac bg-white px-3 py-2.5 text-sm font-semibold text-brand-ink">
             <Filter size={14} className="text-brand-magenta" />
             Showing: <span className="text-brand-magenta">{filtered.length}</span>
           </span>
@@ -552,7 +604,7 @@ export default function LeadGeneration() {
           />
         ) : viewMode === 'grid' ? (
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-            {filtered.map((l) => (
+            {pageRows.map((l) => (
               <LeadCard
                 key={l.id}
                 lead={l}
@@ -564,7 +616,7 @@ export default function LeadGeneration() {
           </div>
         ) : (
           <div className="space-y-2 pb-16">
-            {filtered.map((l) => (
+            {pageRows.map((l) => (
               <LeadRow
                 key={l.id}
                 lead={l}
@@ -573,6 +625,78 @@ export default function LeadGeneration() {
                 onDelete={() => openDelete(l)}
               />
             ))}
+          </div>
+        )}
+
+        {/* PAGINATION */}
+        {filtered.length > 0 && (
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-brand-lilac bg-white px-4 py-3 shadow-[0_4px_16px_-8px_rgba(139,47,214,0.15)]">
+            <p className="text-xs text-brand-ink/60">
+              Showing <span className="font-bold text-brand-ink">{startIdx + 1}–{endIdx}</span> of{' '}
+              <span className="font-bold text-brand-magenta">{filtered.length}</span> leads
+            </p>
+
+            {totalPages > 1 && (
+              <nav aria-label="Pagination" className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => setPage(1)}
+                  disabled={safePage === 1}
+                  aria-label="First page"
+                  className="flex h-8 w-8 items-center justify-center rounded-lg border border-brand-lilac bg-white text-brand-ink/60 transition-all hover:border-brand-magenta/40 hover:text-brand-magenta disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  <ChevronsLeft size={14} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPage(Math.max(1, safePage - 1))}
+                  disabled={safePage === 1}
+                  aria-label="Previous page"
+                  className="flex h-8 w-8 items-center justify-center rounded-lg border border-brand-lilac bg-white text-brand-ink/60 transition-all hover:border-brand-magenta/40 hover:text-brand-magenta disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  <ChevronLeft size={14} />
+                </button>
+
+                {getPageNumbers(safePage, totalPages).map((p, i) =>
+                  p === '…' ? (
+                    <span key={`dots-${i}`} className="px-1.5 text-xs font-bold text-brand-ink/40">…</span>
+                  ) : (
+                    <button
+                      key={p}
+                      type="button"
+                      onClick={() => setPage(p)}
+                      aria-current={p === safePage ? 'page' : undefined}
+                      className={`h-8 min-w-[32px] rounded-lg px-2 text-xs font-bold transition-all ${
+                        p === safePage
+                          ? 'bg-gradient-to-r from-brand-magenta to-brand-purple text-white shadow-[0_4px_14px_-4px_rgba(227,28,121,0.5)]'
+                          : 'border border-brand-lilac bg-white text-brand-ink/70 hover:border-brand-magenta/40 hover:text-brand-magenta'
+                      }`}
+                    >
+                      {p}
+                    </button>
+                  )
+                )}
+
+                <button
+                  type="button"
+                  onClick={() => setPage(Math.min(totalPages, safePage + 1))}
+                  disabled={safePage === totalPages}
+                  aria-label="Next page"
+                  className="flex h-8 w-8 items-center justify-center rounded-lg border border-brand-lilac bg-white text-brand-ink/60 transition-all hover:border-brand-magenta/40 hover:text-brand-magenta disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  <ChevronRight size={14} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPage(totalPages)}
+                  disabled={safePage === totalPages}
+                  aria-label="Last page"
+                  className="flex h-8 w-8 items-center justify-center rounded-lg border border-brand-lilac bg-white text-brand-ink/60 transition-all hover:border-brand-magenta/40 hover:text-brand-magenta disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  <ChevronsRight size={14} />
+                </button>
+              </nav>
+            )}
           </div>
         )}
 
@@ -699,10 +823,10 @@ function DropdownFilter({ label, icon: Icon, value, options, open, onToggle, onC
         ref={triggerRef}
         onClick={handleToggle}
         aria-expanded={open}
-        className="inline-flex items-center gap-2 rounded-full border border-brand-lilac bg-white px-4 py-2.5 text-sm font-medium text-brand-ink hover:bg-brand-lilac/40"
+        className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border border-brand-lilac bg-white px-3 py-2.5 text-sm font-medium text-brand-ink hover:bg-brand-lilac/40"
       >
         {Icon && <Icon size={14} className="text-brand-magenta" />}
-        {label}: <span className="max-w-[100px] truncate font-semibold text-brand-magenta">{value}</span>
+        {label}: <span className="max-w-[90px] truncate font-semibold text-brand-magenta">{value}</span>
         <ChevronDown size={14} className={`text-brand-ink/40 transition-transform ${open ? 'rotate-180' : ''}`} />
       </button>
       {open && (
@@ -933,6 +1057,7 @@ function LeadModal({ mode = 'create', initial = null, defaultAssignee, existingL
 
   useEffect(() => { nameRef.current?.focus(); }, []);
 
+  useLockBodyScroll();
   useEscape(true, () => { if (!submitting) onClose(); });
 
   useEffect(() => () => { if (timeoutRef.current) clearTimeout(timeoutRef.current); }, []);
@@ -974,7 +1099,7 @@ function LeadModal({ mode = 'create', initial = null, defaultAssignee, existingL
       role="dialog"
       aria-modal="true"
       aria-label={isEdit ? 'Edit Lead' : 'Add New Lead'}
-      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto overscroll-contain bg-black/40 p-4 backdrop-blur-sm"
     >
       <div className="my-8 w-full max-w-3xl rounded-2xl bg-white shadow-panel">
         <div className="flex items-center justify-between gap-3 border-b border-brand-lilac/60 px-6 py-4">
@@ -1190,6 +1315,7 @@ function LeadDetailDrawer({ lead: l, onClose, onEdit, onStatusChange }) {
   const StatusIcon = st.icon;
   const SourceIcon = SOURCE_ICONS[l.source] || Globe;
 
+  useLockBodyScroll();
   useEscape(true, onClose);
 
   const initials = (l.name || '')
@@ -1205,9 +1331,9 @@ function LeadDetailDrawer({ lead: l, onClose, onEdit, onStatusChange }) {
       role="dialog"
       aria-modal="true"
       aria-label="Lead details"
-      className="fixed inset-0 z-50 flex justify-end bg-black/40 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex justify-end overflow-hidden bg-black/40 backdrop-blur-sm"
     >
-      <div className="h-full w-full max-w-2xl overflow-y-auto bg-white shadow-panel animate-slide-in-right">
+      <div className="h-full w-full max-w-2xl overflow-y-auto overscroll-contain bg-white shadow-panel animate-slide-in-right">
         <div className="sticky top-0 z-10 flex items-center justify-between gap-3 border-b border-brand-lilac bg-gradient-to-r from-brand-mist/60 to-white px-6 py-4 backdrop-blur-sm">
           <div className="flex items-center gap-3">
             <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-brand-magenta to-brand-purple text-white shadow-sm">
@@ -1382,6 +1508,7 @@ function EmptyState({ hasFilters, onClear, onCreate }) {
 }
 
 function ConfirmDialog({ title, message, confirmLabel, onCancel, onConfirm }) {
+  useLockBodyScroll();
   useEscape(true, onCancel);
   return (
     <div

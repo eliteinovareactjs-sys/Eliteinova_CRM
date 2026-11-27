@@ -12,6 +12,7 @@ import {
   BellRing, UserPlus, UserCheck, Send, RotateCcw, UserX, Hash,
   Mail, MessageCircle, Clipboard, Sparkles, Zap, Plus, CalendarDays,
   ArrowRight, X as XIcon,
+  List, ChevronsLeft, ChevronsRight,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import {
@@ -65,6 +66,7 @@ const MONTH_NAMES = [
 const WEEK_DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 const STORAGE_PREFIX = 'followUps:';
+const PAGE_SIZE_OPTIONS = [10, 25, 50];
 
 /* ═══════════════════════════════════════════════════════════════
    HELPERS
@@ -124,6 +126,35 @@ const buildFullFollowUp = (f) => ({
 const initials = (name) =>
   (name || '?').split(' ').map((n) => n[0]).slice(0, 2).join('').toUpperCase();
 
+/* Lock background page scroll while a drawer/modal is open */
+function useLockBodyScroll() {
+  useEffect(() => {
+    const scrollY = window.scrollY;
+    const prevBody = document.body.style.overflow;
+    const prevHtml = document.documentElement.style.overflow;
+    document.body.style.overflow = 'hidden';
+    document.documentElement.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = prevBody;
+      document.documentElement.style.overflow = prevHtml;
+      window.scrollTo(0, scrollY);
+    };
+  }, []);
+}
+
+/* Page numbers with ellipsis, e.g. [1, '…', 4, 5, 6, '…', 12] */
+function getPageNumbers(current, total) {
+  if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
+  const pages = new Set([1, total, current - 1, current, current + 1]);
+  const sorted = [...pages].filter((p) => p >= 1 && p <= total).sort((a, b) => a - b);
+  const out = [];
+  sorted.forEach((p, i) => {
+    if (i > 0 && p - sorted[i - 1] > 1) out.push('…');
+    out.push(p);
+  });
+  return out;
+}
+
 /* ═══════════════════════════════════════════════════════════════
    MAIN COMPONENT
    ═══════════════════════════════════════════════════════════════ */
@@ -143,6 +174,9 @@ export default function FollowUps() {
   const [searchQuery, setSearchQuery] = useState('');
   const [agentFilter, setAgentFilter] = useState('All');
   const [agentOpen, setAgentOpen] = useState(false);
+  const [rowsOpen, setRowsOpen] = useState(false);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(PAGE_SIZE_OPTIONS[0]);
   const [menuOpenId, setMenuOpenId] = useState(null);
   const [viewMode, setViewMode] = useState('list');
   const [calendarMonth, setCalendarMonth] = useState(new Date().getMonth());
@@ -208,6 +242,15 @@ export default function FollowUps() {
       return String(a.date).localeCompare(String(b.date));
     });
   }, [withStatus, tab, searchQuery, agentFilter]);
+
+  /* ── PAGINATION ── */
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const safePage = Math.min(page, totalPages);
+  const startIdx = (safePage - 1) * pageSize;
+  const endIdx = Math.min(safePage * pageSize, filtered.length);
+  const pageRows = filtered.slice(startIdx, startIdx + pageSize);
+
+  useEffect(() => { setPage(1); }, [tab, searchQuery, agentFilter, pageSize]);
 
   /* Follow-ups for the selected calendar date */
   const selectedDateFollowUps = useMemo(() => {
@@ -463,7 +506,7 @@ export default function FollowUps() {
       <div className="pointer-events-none absolute -top-32 -right-32 h-96 w-96 rounded-full bg-brand-magenta/[0.05] blur-3xl" />
       <div className="pointer-events-none absolute top-1/2 -left-32 h-80 w-80 rounded-full bg-brand-purple/[0.05] blur-3xl" />
 
-      <div className="relative space-y-5 px-1 py-1">
+      <div className="relative space-y-5 px-1 py-1 pb-16">
         {/* ═══ HEADER ═══ */}
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
@@ -590,7 +633,7 @@ export default function FollowUps() {
 
             <div className="relative">
               <button
-                onClick={() => setAgentOpen((s) => !s)}
+                onClick={() => { setAgentOpen((s) => !s); setRowsOpen(false); }}
                 className="inline-flex items-center gap-2 rounded-full border border-brand-lilac bg-white px-4 py-2.5 text-sm font-medium text-brand-ink hover:bg-brand-lilac/40"
               >
                 <UserIcon size={14} className="text-brand-magenta" />
@@ -608,6 +651,33 @@ export default function FollowUps() {
                         className={`w-full rounded-lg px-3 py-2 text-left text-sm ${agentFilter === o ? 'bg-brand-magenta/10 font-semibold text-brand-magenta' : 'text-brand-ink/70 hover:bg-brand-lilac/40'}`}
                       >
                         {o}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+
+            <div className="relative">
+              <button
+                onClick={() => { setRowsOpen((s) => !s); setAgentOpen(false); }}
+                className="inline-flex items-center gap-2 rounded-full border border-brand-lilac bg-white px-4 py-2.5 text-sm font-medium text-brand-ink hover:bg-brand-lilac/40"
+              >
+                <List size={14} className="text-brand-magenta" />
+                Rows: <span className="font-semibold text-brand-magenta">{pageSize}</span>
+                <ChevronDown size={14} className={`text-brand-ink/40 transition-transform ${rowsOpen ? 'rotate-180' : ''}`} />
+              </button>
+              {rowsOpen && (
+                <>
+                  <div className="fixed inset-0 z-10" onClick={() => setRowsOpen(false)} />
+                  <div className="absolute right-0 top-full z-20 mt-2 w-40 overflow-hidden rounded-xl border border-brand-lilac bg-white p-1 shadow-panel">
+                    {PAGE_SIZE_OPTIONS.map((n) => (
+                      <button
+                        key={n}
+                        onClick={() => { setPageSize(n); setRowsOpen(false); }}
+                        className={`w-full rounded-lg px-3 py-2 text-left text-sm ${pageSize === n ? 'bg-brand-magenta/10 font-semibold text-brand-magenta' : 'text-brand-ink/70 hover:bg-brand-lilac/40'}`}
+                      >
+                        {n}
                       </button>
                     ))}
                   </div>
@@ -644,7 +714,7 @@ export default function FollowUps() {
           />
         ) : (
           <div className="space-y-2">
-            {filtered.map((f) => (
+            {pageRows.map((f) => (
               <FollowUpRow
                 key={f.id}
                 followUp={f}
@@ -662,6 +732,78 @@ export default function FollowUps() {
                 setMenuOpenId={setMenuOpenId}
               />
             ))}
+          </div>
+        )}
+
+        {/* ═══ PAGINATION (list view only) ═══ */}
+        {viewMode === 'list' && filtered.length > 0 && (
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-brand-lilac bg-white px-4 py-3 shadow-[0_4px_16px_-8px_rgba(139,47,214,0.15)]">
+            <p className="text-xs text-brand-ink/60">
+              Showing <span className="font-bold text-brand-ink">{startIdx + 1}–{endIdx}</span> of{' '}
+              <span className="font-bold text-brand-magenta">{filtered.length}</span> follow-ups
+            </p>
+
+            {totalPages > 1 && (
+              <nav aria-label="Pagination" className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => setPage(1)}
+                  disabled={safePage === 1}
+                  aria-label="First page"
+                  className="flex h-8 w-8 items-center justify-center rounded-lg border border-brand-lilac bg-white text-brand-ink/60 transition-all hover:border-brand-magenta/40 hover:text-brand-magenta disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  <ChevronsLeft size={14} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPage(Math.max(1, safePage - 1))}
+                  disabled={safePage === 1}
+                  aria-label="Previous page"
+                  className="flex h-8 w-8 items-center justify-center rounded-lg border border-brand-lilac bg-white text-brand-ink/60 transition-all hover:border-brand-magenta/40 hover:text-brand-magenta disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  <ChevronLeft size={14} />
+                </button>
+
+                {getPageNumbers(safePage, totalPages).map((p, i) =>
+                  p === '…' ? (
+                    <span key={`dots-${i}`} className="px-1.5 text-xs font-bold text-brand-ink/40">…</span>
+                  ) : (
+                    <button
+                      key={p}
+                      type="button"
+                      onClick={() => setPage(p)}
+                      aria-current={p === safePage ? 'page' : undefined}
+                      className={`h-8 min-w-[32px] rounded-lg px-2 text-xs font-bold transition-all ${
+                        p === safePage
+                          ? 'bg-gradient-to-r from-brand-magenta to-brand-purple text-white shadow-[0_4px_14px_-4px_rgba(227,28,121,0.5)]'
+                          : 'border border-brand-lilac bg-white text-brand-ink/70 hover:border-brand-magenta/40 hover:text-brand-magenta'
+                      }`}
+                    >
+                      {p}
+                    </button>
+                  )
+                )}
+
+                <button
+                  type="button"
+                  onClick={() => setPage(Math.min(totalPages, safePage + 1))}
+                  disabled={safePage === totalPages}
+                  aria-label="Next page"
+                  className="flex h-8 w-8 items-center justify-center rounded-lg border border-brand-lilac bg-white text-brand-ink/60 transition-all hover:border-brand-magenta/40 hover:text-brand-magenta disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  <ChevronRight size={14} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPage(totalPages)}
+                  disabled={safePage === totalPages}
+                  aria-label="Last page"
+                  className="flex h-8 w-8 items-center justify-center rounded-lg border border-brand-lilac bg-white text-brand-ink/60 transition-all hover:border-brand-magenta/40 hover:text-brand-magenta disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  <ChevronsRight size={14} />
+                </button>
+              </nav>
+            )}
           </div>
         )}
 
@@ -1128,6 +1270,7 @@ function CalendarView({ followUps, month, year, setMonth, setYear, onDayClick })
    ═══════════════════════════════════════════════════════════════ */
 function DayDetailDrawer({ date, followUps, onClose, onCall, onComplete, onCancel, onReschedule, onReactivate, onNotes, onReminder, onAssign, onDelete, onCreateNew }) {
   const [menuOpenId, setMenuOpenId] = useState(null);
+  useLockBodyScroll();
 
   const summary = useMemo(() => {
     return {
@@ -1142,8 +1285,8 @@ function DayDetailDrawer({ date, followUps, onClose, onCall, onComplete, onCance
   }, [followUps]);
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end bg-black/40 backdrop-blur-sm">
-      <div className="h-full w-full max-w-2xl overflow-y-auto bg-white shadow-panel animate-slide-in-right">
+    <div className="fixed inset-0 z-50 flex justify-end overflow-hidden bg-black/40 backdrop-blur-sm">
+      <div className="h-full w-full max-w-2xl overflow-y-auto overscroll-contain bg-white shadow-panel animate-slide-in-right">
         <div className="sticky top-0 z-10 flex items-center justify-between gap-3 border-b border-brand-lilac bg-gradient-to-r from-brand-mist/60 to-white px-6 py-4 backdrop-blur-sm">
           <div className="flex items-center gap-3">
             <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-brand-magenta to-brand-purple text-white shadow-sm">
@@ -1342,6 +1485,7 @@ function DayStat({ label, value, tone = 'purple' }) {
    CALL MODAL
    ═══════════════════════════════════════════════════════════════ */
 function CallModal({ target, onClose, onEnd }) {
+  useLockBodyScroll();
   const [callState, setCallState] = useState('ringing');
   const [seconds, setSeconds] = useState(0);
   const [muted, setMuted] = useState(false);
@@ -1911,6 +2055,7 @@ function ScheduleNewModal({ agents, onClose, onSave }) {
    SHARED SUBCOMPONENTS
    ═══════════════════════════════════════════════════════════════ */
 function ModalShell({ title, subtitle, children, onClose, icon: Icon, iconTone = 'purple' }) {
+  useLockBodyScroll();
   const tones = {
     purple:  'from-brand-magenta to-brand-purple',
     amber:   'from-amber-500 to-orange-500',
@@ -1976,6 +2121,7 @@ function EmptyState({ hasFilters, onClear, tab }) {
 }
 
 function ConfirmDialog({ title, message, confirmLabel, confirmTone = 'rose', onCancel, onConfirm }) {
+  useLockBodyScroll();
   const tones = {
     rose:  'bg-rose-500 hover:bg-rose-600',
     amber: 'bg-amber-500 hover:bg-amber-600',

@@ -7,6 +7,7 @@ import {
   Inbox, Download, Grid3x3, List, Activity, Star, Megaphone,
   Send, Users, Flag, PlayCircle, RotateCcw,
   CalendarDays, TrendingUp, BarChart3,
+  ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 
@@ -58,6 +59,7 @@ const CATEGORY_ICONS = {
 const ASSIGNEES = ['Ravi Sharma', 'Anita Desai', 'Kiran Rao', 'Priya Menon', 'Self'];
 
 const STORAGE_KEY = 'tasks:marketing';
+const PAGE_SIZE_OPTIONS = [10, 25, 50];
 
 /* ─── Date Helpers ─── */
 const todayISO = () => {
@@ -157,6 +159,35 @@ const saveState = (storageKey, value) => {
   }
 };
 
+/* Lock background page scroll while a drawer/modal is open */
+function useLockBodyScroll() {
+  useEffect(() => {
+    const scrollY = window.scrollY;
+    const prevBody = document.body.style.overflow;
+    const prevHtml = document.documentElement.style.overflow;
+    document.body.style.overflow = 'hidden';
+    document.documentElement.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = prevBody;
+      document.documentElement.style.overflow = prevHtml;
+      window.scrollTo(0, scrollY);
+    };
+  }, []);
+}
+
+/* Page numbers with ellipsis, e.g. [1, '…', 4, 5, 6, '…', 12] */
+function getPageNumbers(current, total) {
+  if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
+  const pages = new Set([1, total, current - 1, current, current + 1]);
+  const sorted = [...pages].filter((p) => p >= 1 && p <= total).sort((a, b) => a - b);
+  const out = [];
+  sorted.forEach((p, i) => {
+    if (i > 0 && p - sorted[i - 1] > 1) out.push('…');
+    out.push(p);
+  });
+  return out;
+}
+
 /* ═══════════════════════════════════════════════════════════════
    SEED DATA
    ═══════════════════════════════════════════════════════════════ */
@@ -194,7 +225,10 @@ function MarketingTasksContent({ storageKey, user }) {
   const [priorityOpen, setPriorityOpen] = useState(false);
   const [categoryFilter, setCategoryFilter] = useState('All');
   const [categoryOpen, setCategoryOpen] = useState(false);
+  const [rowsOpen, setRowsOpen] = useState(false);
   const [viewMode, setViewMode] = useState('list');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(PAGE_SIZE_OPTIONS[0]);
   const [toast, setToast] = useState(null);
 
   const [showModal, setShowModal] = useState(false);
@@ -259,6 +293,15 @@ function MarketingTasksContent({ storageKey, user }) {
       return String(b.updatedAt || '').localeCompare(String(a.updatedAt || ''));
     });
   }, [tasks, activeTab, statusFilter, priorityFilter, categoryFilter, searchQuery]);
+
+  /* ── PAGINATION ── */
+  const totalPages = Math.max(1, Math.ceil(tabFiltered.length / pageSize));
+  const safePage = Math.min(page, totalPages);
+  const startIdx = (safePage - 1) * pageSize;
+  const endIdx = Math.min(safePage * pageSize, tabFiltered.length);
+  const pageRows = tabFiltered.slice(startIdx, startIdx + pageSize);
+
+  useEffect(() => { setPage(1); }, [activeTab, statusFilter, priorityFilter, categoryFilter, searchQuery, pageSize]);
 
   const summary = useMemo(() => {
     const statuses = tasks.map(getEffectiveStatus);
@@ -482,8 +525,8 @@ function MarketingTasksContent({ storageKey, user }) {
         </div>
 
         {/* FILTER BAR */}
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="relative min-w-[220px] flex-1">
+        <div className="flex flex-wrap items-center gap-2 lg:flex-nowrap">
+          <div className="relative min-w-[100px] flex-1">
             <Search size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-brand-ink/40" />
             <input value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Search by title, category, project…" className="w-full rounded-full border border-brand-lilac bg-white py-2.5 pl-11 pr-10 text-sm outline-none focus:border-brand-magenta focus:ring-2 focus:ring-brand-magenta/15" />
             {searchQuery && (
@@ -493,22 +536,23 @@ function MarketingTasksContent({ storageKey, user }) {
             )}
           </div>
 
-          <DropdownFilter label="Status" icon={Filter} value={statusFilter} options={['All', ...TASK_STATUSES]} open={statusOpen} onToggle={() => { setStatusOpen((s) => !s); setPriorityOpen(false); setCategoryOpen(false); }} onChange={(v) => { setStatusFilter(v); setStatusOpen(false); }} />
-          <DropdownFilter label="Priority" icon={Flame} value={priorityFilter} options={['All', 'High', 'Medium', 'Low']} open={priorityOpen} onToggle={() => { setPriorityOpen((s) => !s); setStatusOpen(false); setCategoryOpen(false); }} onChange={(v) => { setPriorityFilter(v); setPriorityOpen(false); }} />
-          <DropdownFilter label="Category" icon={Briefcase} value={categoryFilter} options={['All', ...TASK_CATEGORIES]} open={categoryOpen} onToggle={() => { setCategoryOpen((s) => !s); setStatusOpen(false); setPriorityOpen(false); }} onChange={(v) => { setCategoryFilter(v); setCategoryOpen(false); }} />
+          <DropdownFilter label="Status" icon={Filter} value={statusFilter} options={['All', ...TASK_STATUSES]} open={statusOpen} onToggle={() => { setStatusOpen((s) => !s); setPriorityOpen(false); setCategoryOpen(false); setRowsOpen(false); }} onChange={(v) => { setStatusFilter(v); setStatusOpen(false); }} />
+          <DropdownFilter label="Priority" icon={Flame} value={priorityFilter} options={['All', 'High', 'Medium', 'Low']} open={priorityOpen} onToggle={() => { setPriorityOpen((s) => !s); setStatusOpen(false); setCategoryOpen(false); setRowsOpen(false); }} onChange={(v) => { setPriorityFilter(v); setPriorityOpen(false); }} />
+          <DropdownFilter label="Category" icon={Briefcase} value={categoryFilter} options={['All', ...TASK_CATEGORIES]} open={categoryOpen} onToggle={() => { setCategoryOpen((s) => !s); setStatusOpen(false); setPriorityOpen(false); setRowsOpen(false); }} onChange={(v) => { setCategoryFilter(v); setCategoryOpen(false); }} />
+          <DropdownFilter label="Rows" icon={List} value={String(pageSize)} options={PAGE_SIZE_OPTIONS.map(String)} open={rowsOpen} onToggle={() => { setRowsOpen((s) => !s); setStatusOpen(false); setPriorityOpen(false); setCategoryOpen(false); }} onChange={(v) => { setPageSize(Number(v)); setRowsOpen(false); }} />
 
           {hasFilters && (
-            <button onClick={clearFilters} className="flex items-center gap-1 rounded-full border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-500 hover:bg-rose-100">
+            <button onClick={clearFilters} className="flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full border border-rose-200 bg-rose-50 px-3 py-2.5 text-xs font-semibold text-rose-500 hover:bg-rose-100">
               <X size={12} /> Clear
             </button>
           )}
 
-          <span className="inline-flex items-center gap-2 rounded-full border border-brand-lilac bg-white px-4 py-2.5 text-sm font-semibold text-brand-ink">
-            <Filter size={14} className="text-brand-magenta" />
+          <span className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full border border-brand-lilac bg-white px-2.5 py-2.5 text-xs font-semibold text-brand-ink">
+            <Filter size={13} className="text-brand-magenta" />
             Showing: <span className="text-brand-magenta">{tabFiltered.length}</span>
           </span>
 
-          <div className="flex items-center gap-1 rounded-full border border-brand-lilac bg-white p-1">
+          <div className="flex shrink-0 items-center gap-1 rounded-full border border-brand-lilac bg-white p-1">
             <button onClick={() => setViewMode('grid')} className={`rounded-full p-1.5 transition-all ${viewMode === 'grid' ? 'border border-brand-magenta bg-brand-magenta/10 text-brand-magenta' : 'text-brand-ink/50 hover:bg-brand-lilac/30'}`} title="Grid view" aria-label="Grid view">
               <Grid3x3 size={14} />
             </button>
@@ -522,8 +566,8 @@ function MarketingTasksContent({ storageKey, user }) {
         {tabFiltered.length === 0 ? (
           <EmptyState hasFilters={hasFilters} onClear={clearFilters} onCreate={openCreate} />
         ) : viewMode === 'grid' ? (
-          <div className="grid grid-cols-1 gap-4 pb-40 md:grid-cols-2 xl:grid-cols-3">
-            {tabFiltered.map((t) => (
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+            {pageRows.map((t) => (
               <TaskCard key={t.id} task={{ ...t, status: getEffectiveStatus(t) }} onView={() => openView(t)} onEdit={() => openEdit(t)} onComplete={() => handleComplete(t.id)} onStart={() => handleStart(t.id)} onReopen={() => handleReopen(t.id)} />
             ))}
           </div>
@@ -543,7 +587,7 @@ function MarketingTasksContent({ storageKey, user }) {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-brand-lilac/40">
-                  {tabFiltered.map((t) => {
+                  {pageRows.map((t) => {
                     const status = getEffectiveStatus(t);
                     const st = STATUS_STYLES[status] || STATUS_STYLES.Pending;
                     const StatusIcon = st.icon;
@@ -580,6 +624,78 @@ function MarketingTasksContent({ storageKey, user }) {
                 </tbody>
               </table>
             </div>
+          </div>
+        )}
+
+        {/* PAGINATION */}
+        {tabFiltered.length > 0 && (
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-brand-lilac bg-white px-4 py-3 shadow-[0_4px_16px_-8px_rgba(139,47,214,0.15)]">
+            <p className="text-xs text-brand-ink/60">
+              Showing <span className="font-bold text-brand-ink">{startIdx + 1}–{endIdx}</span> of{' '}
+              <span className="font-bold text-brand-magenta">{tabFiltered.length}</span> tasks
+            </p>
+
+            {totalPages > 1 && (
+              <nav aria-label="Pagination" className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => setPage(1)}
+                  disabled={safePage === 1}
+                  aria-label="First page"
+                  className="flex h-8 w-8 items-center justify-center rounded-lg border border-brand-lilac bg-white text-brand-ink/60 transition-all hover:border-brand-magenta/40 hover:text-brand-magenta disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  <ChevronsLeft size={14} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPage(Math.max(1, safePage - 1))}
+                  disabled={safePage === 1}
+                  aria-label="Previous page"
+                  className="flex h-8 w-8 items-center justify-center rounded-lg border border-brand-lilac bg-white text-brand-ink/60 transition-all hover:border-brand-magenta/40 hover:text-brand-magenta disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  <ChevronLeft size={14} />
+                </button>
+
+                {getPageNumbers(safePage, totalPages).map((p, i) =>
+                  p === '…' ? (
+                    <span key={`dots-${i}`} className="px-1.5 text-xs font-bold text-brand-ink/40">…</span>
+                  ) : (
+                    <button
+                      key={p}
+                      type="button"
+                      onClick={() => setPage(p)}
+                      aria-current={p === safePage ? 'page' : undefined}
+                      className={`h-8 min-w-[32px] rounded-lg px-2 text-xs font-bold transition-all ${
+                        p === safePage
+                          ? 'bg-gradient-to-r from-brand-magenta to-brand-purple text-white shadow-[0_4px_14px_-4px_rgba(227,28,121,0.5)]'
+                          : 'border border-brand-lilac bg-white text-brand-ink/70 hover:border-brand-magenta/40 hover:text-brand-magenta'
+                      }`}
+                    >
+                      {p}
+                    </button>
+                  )
+                )}
+
+                <button
+                  type="button"
+                  onClick={() => setPage(Math.min(totalPages, safePage + 1))}
+                  disabled={safePage === totalPages}
+                  aria-label="Next page"
+                  className="flex h-8 w-8 items-center justify-center rounded-lg border border-brand-lilac bg-white text-brand-ink/60 transition-all hover:border-brand-magenta/40 hover:text-brand-magenta disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  <ChevronRight size={14} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPage(totalPages)}
+                  disabled={safePage === totalPages}
+                  aria-label="Last page"
+                  className="flex h-8 w-8 items-center justify-center rounded-lg border border-brand-lilac bg-white text-brand-ink/60 transition-all hover:border-brand-magenta/40 hover:text-brand-magenta disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  <ChevronsRight size={14} />
+                </button>
+              </nav>
+            )}
           </div>
         )}
 
@@ -670,10 +786,10 @@ function useAnimatedCount(target, duration = 600) {
 function DropdownFilter({ label, icon: Icon, value, options, open, onToggle, onChange }) {
   return (
     <div className="relative">
-      <button type="button" onClick={onToggle} aria-expanded={open} className="inline-flex items-center gap-2 rounded-full border border-brand-lilac bg-white px-4 py-2.5 text-sm font-medium text-brand-ink hover:bg-brand-lilac/40">
-        {Icon && <Icon size={14} className="text-brand-magenta" />}
-        {label}: <span className="max-w-[140px] truncate font-semibold text-brand-magenta">{value}</span>
-        <ChevronDown size={14} className={`text-brand-ink/40 transition-transform ${open ? 'rotate-180' : ''}`} />
+      <button type="button" onClick={onToggle} aria-expanded={open} className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full border border-brand-lilac bg-white px-2.5 py-2.5 text-xs font-medium text-brand-ink hover:bg-brand-lilac/40">
+        {Icon && <Icon size={13} className="text-brand-magenta" />}
+        {label}: <span className="max-w-[80px] truncate font-semibold text-brand-magenta">{value}</span>
+        <ChevronDown size={13} className={`text-brand-ink/40 transition-transform ${open ? 'rotate-180' : ''}`} />
       </button>
       {open && (
         <>
@@ -768,6 +884,7 @@ function TaskModal({ mode = 'create', initial = null, assignees, onClose, onSubm
   useEffect(() => {
     titleRef.current?.focus();
   }, []);
+  useLockBodyScroll();
 
   const updateForm = (field, value) => {
     setForm((prev) => ({ ...prev, [field]: value }));
@@ -785,7 +902,7 @@ function TaskModal({ mode = 'create', initial = null, assignees, onClose, onSubm
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4 backdrop-blur-sm" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto overscroll-contain bg-black/40 p-4 backdrop-blur-sm" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div className="my-8 w-full max-w-3xl rounded-2xl bg-white shadow-panel">
         <div className="flex items-center justify-between gap-3 border-b border-brand-lilac/60 px-6 py-4">
           <div className="flex items-center gap-3">
@@ -904,9 +1021,11 @@ function TaskDetailDrawer({ task: t, onClose, onEdit, onComplete, onStart, onReo
   const PriorityIcon = pr.icon;
   const CatIcon = CATEGORY_ICONS[t.category] || Briefcase;
 
+  useLockBodyScroll();
+
   return (
-    <div className="fixed inset-0 z-50 flex justify-end bg-black/40 backdrop-blur-sm" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="h-full w-full max-w-2xl overflow-y-auto bg-white shadow-panel animate-slide-in-right">
+    <div className="fixed inset-0 z-50 flex justify-end overflow-hidden bg-black/40 backdrop-blur-sm" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="h-full w-full max-w-2xl overflow-y-auto overscroll-contain bg-white shadow-panel animate-slide-in-right">
         <div className="sticky top-0 z-10 flex items-center justify-between gap-3 border-b border-brand-lilac bg-gradient-to-r from-brand-mist/60 to-white px-6 py-4 backdrop-blur-sm">
           <div className="flex items-center gap-3">
             <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-brand-magenta to-brand-purple text-white shadow-sm"><CatIcon size={18} /></span>
@@ -1034,6 +1153,7 @@ function EmptyState({ hasFilters, onClear, onCreate }) {
 }
 
 function ConfirmDialog({ title, message, confirmLabel, onCancel, onConfirm }) {
+  useLockBodyScroll();
   return (
     <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm" onMouseDown={(e) => { if (e.target === e.currentTarget) onCancel(); }}>
       <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-panel">

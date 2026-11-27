@@ -197,6 +197,22 @@ const HEALTH_TONES = {
   rose:    'bg-rose-50 text-rose-500 ring-rose-200',
 };
 
+/* Lock background page scroll while a drawer/modal is open */
+function useLockBodyScroll() {
+  useEffect(() => {
+    const scrollY = window.scrollY;
+    const prevBody = document.body.style.overflow;
+    const prevHtml = document.documentElement.style.overflow;
+    document.body.style.overflow = 'hidden';
+    document.documentElement.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = prevBody;
+      document.documentElement.style.overflow = prevHtml;
+      window.scrollTo(0, scrollY);
+    };
+  }, []);
+}
+
 /* Escape-key hook */
 function useEscape(enabled, handler) {
   const handlerRef = useRef(handler);
@@ -1026,6 +1042,7 @@ function CampaignModal({ mode = 'create', initial = null, defaultAssignee, onClo
 
   useEffect(() => { nameRef.current?.focus(); }, []);
 
+  useLockBodyScroll();
   useEscape(true, () => { if (!submitting) onClose(); });
 
   useEffect(() => () => { if (timeoutRef.current) clearTimeout(timeoutRef.current); }, []);
@@ -1062,7 +1079,7 @@ function CampaignModal({ mode = 'create', initial = null, defaultAssignee, onClo
       role="dialog"
       aria-modal="true"
       aria-label={isEdit ? 'Edit Campaign' : 'Create Campaign'}
-      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto overscroll-contain bg-black/40 p-4 backdrop-blur-sm"
     >
       <div className="my-8 w-full max-w-3xl rounded-2xl bg-white shadow-panel">
         <div className="flex items-center justify-between gap-3 border-b border-brand-lilac/60 px-6 py-4">
@@ -1233,6 +1250,7 @@ function CampaignDetailsDrawer({ campaign: c, onClose, onEdit, onMonitoring, onT
   const targetProgress = target > 0 ? Math.round((c.leads / target) * 100) : 0;
   const cpl = c.leads ? (c.budget / c.leads) : 0;
 
+  useLockBodyScroll();
   useEscape(true, onClose);
 
   return (
@@ -1240,9 +1258,9 @@ function CampaignDetailsDrawer({ campaign: c, onClose, onEdit, onMonitoring, onT
       role="dialog"
       aria-modal="true"
       aria-label="Campaign details"
-      className="fixed inset-0 z-50 flex justify-end bg-black/40 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex justify-end overflow-hidden bg-black/40 backdrop-blur-sm"
     >
-      <div className="h-full w-full max-w-2xl overflow-y-auto bg-white shadow-panel animate-slide-in-right">
+      <div className="h-full w-full max-w-2xl overflow-y-auto overscroll-contain bg-white shadow-panel animate-slide-in-right">
         <div className="sticky top-0 z-10 flex items-center justify-between gap-3 border-b border-brand-lilac bg-gradient-to-r from-brand-mist/60 to-white px-6 py-4 backdrop-blur-sm">
           <div className="flex items-center gap-3">
             <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-brand-magenta to-brand-purple text-white shadow-sm">
@@ -1392,6 +1410,7 @@ function CampaignMonitoringDrawer({ campaign: c, onClose }) {
   ];
   const funnelDenom = Math.max(c.targetLeads || 0, c.leads, 1);
 
+  useLockBodyScroll();
   useEscape(true, onClose);
 
   const handleExportReport = () => {
@@ -1406,13 +1425,6 @@ function CampaignMonitoringDrawer({ campaign: c, onClose }) {
       ['CPL', cpl.toFixed(2)], ['Conversion Rate', `${conversionRate}%`], ['Target Progress', `${targetProgress}%`],
     ];
     downloadCsv(rows, `campaign-monitoring-${c.id}.csv`);
-    const blob = new Blob([csv], { type: 'text/csv' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `campaign-monitoring-${c.id}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
   };
 
   return (
@@ -1420,9 +1432,9 @@ function CampaignMonitoringDrawer({ campaign: c, onClose }) {
       role="dialog"
       aria-modal="true"
       aria-label="Campaign monitoring"
-      className="fixed inset-0 z-50 flex justify-end bg-black/40 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex justify-end overflow-hidden bg-black/40 backdrop-blur-sm"
     >
-      <div className="h-full w-full max-w-2xl overflow-y-auto bg-white shadow-panel animate-slide-in-right">
+      <div className="h-full w-full max-w-2xl overflow-y-auto overscroll-contain bg-white shadow-panel animate-slide-in-right">
         <div className="sticky top-0 z-10 flex items-center justify-between gap-3 border-b border-brand-lilac bg-gradient-to-r from-brand-mist/60 to-white px-6 py-4 backdrop-blur-sm">
           <div className="flex items-center gap-3">
             <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-brand-magenta to-brand-purple text-white shadow-sm">
@@ -1635,6 +1647,7 @@ function EmptyState({ hasFilters, onClear, onCreate }) {
 }
 
 function ConfirmDialog({ title, message, confirmLabel, onCancel, onConfirm }) {
+  useLockBodyScroll();
   useEscape(true, onCancel);
   return (
     <div

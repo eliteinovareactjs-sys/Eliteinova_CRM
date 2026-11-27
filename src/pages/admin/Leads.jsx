@@ -9,6 +9,7 @@ import {
   Volume2, VolumeX, PauseCircle, PlayCircle, FileUp, StickyNote, Plus,
   History, Edit3, UserPlus, Inbox, Users2, Send, ArrowRightLeft, UserX,
   Sparkles, Copy, Filter, ChevronRight, Zap, Activity,
+  ChevronLeft, ChevronsLeft, ChevronsRight,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import {
@@ -65,6 +66,7 @@ const TAB_FILTERS = {
 };
 
 const STORAGE_PREFIX = 'leads:';
+const PAGE_SIZE_OPTIONS = [10, 25, 50];
 
 /* ============ HELPERS ============ */
 let uidCounter = 0;
@@ -87,6 +89,35 @@ const saveState = (key, value) => {
     localStorage.setItem(`${STORAGE_PREFIX}${key}`, JSON.stringify(value));
   } catch { /* ignore */ }
 };
+
+/* Lock background page scroll while a drawer/modal is open */
+function useLockBodyScroll() {
+  useEffect(() => {
+    const scrollY = window.scrollY;
+    const prevBody = document.body.style.overflow;
+    const prevHtml = document.documentElement.style.overflow;
+    document.body.style.overflow = 'hidden';
+    document.documentElement.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = prevBody;
+      document.documentElement.style.overflow = prevHtml;
+      window.scrollTo(0, scrollY);
+    };
+  }, []);
+}
+
+/* Page numbers with ellipsis, e.g. [1, '…', 4, 5, 6, '…', 12] */
+function getPageNumbers(current, total) {
+  if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
+  const pages = new Set([1, total, current - 1, current, current + 1]);
+  const sorted = [...pages].filter((p) => p >= 1 && p <= total).sort((a, b) => a - b);
+  const out = [];
+  sorted.forEach((p, i) => {
+    if (i > 0 && p - sorted[i - 1] > 1) out.push('…');
+    out.push(p);
+  });
+  return out;
+}
 
 export default function Leads() {
   const { activeWebsiteId, activeWebsite } = useAuth();
@@ -142,6 +173,9 @@ export default function Leads() {
   /* ========== UI ========== */
   const [sourceOpen, setSourceOpen] = useState(false);
   const [agentOpen, setAgentOpen] = useState(false);
+  const [rowsOpen, setRowsOpen] = useState(false);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(PAGE_SIZE_OPTIONS[0]);
   const [menuOpenId, setMenuOpenId] = useState(null);
   const [viewMode, setViewMode] = useState('list');
 
@@ -251,6 +285,42 @@ export default function Leads() {
       return acc;
     }, {});
   }, [displayedLeads, groupView, activeTab]);
+
+  /* ========== PAGINATION ========== */
+  const totalItems =
+    activeTab === 'duplicate' ? Object.keys(groupedLeads).length : displayedLeads.length;
+  const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
+  const safePage = Math.min(page, totalPages);
+  const startIdx = (safePage - 1) * pageSize;
+  const endIdx = Math.min(safePage * pageSize, totalItems);
+
+  /* Normal tabs: slice the leads, then group only that slice */
+  const pagedGroups = useMemo(() => {
+    if (activeTab === 'duplicate') return {};
+    const slice = displayedLeads.slice(startIdx, startIdx + pageSize);
+    if (groupView === 'all') return { All: slice };
+    const keyFn = {
+      source: (l) => l.leadSource || 'Other',
+      status: (l) => l.status || 'Fresh',
+      agent: (l) => l.assignedAgent || 'Unassigned',
+    }[groupView];
+    return slice.reduce((acc, lead) => {
+      const key = keyFn(lead);
+      if (!acc[key]) acc[key] = [];
+      acc[key].push(lead);
+      return acc;
+    }, {});
+  }, [displayedLeads, groupView, activeTab, startIdx, pageSize]);
+
+  /* Duplicates tab: paginate the duplicate groups */
+  const pagedDuplicateGroups = useMemo(
+    () => Object.entries(groupedLeads).slice(startIdx, startIdx + pageSize),
+    [groupedLeads, startIdx, pageSize]
+  );
+
+  useEffect(() => {
+    setPage(1);
+  }, [activeTab, sourceFilter, agentFilter, searchQuery, groupView, pageSize]);
 
   /* ========== SUMMARY ========== */
   const summary = useMemo(() => {
@@ -570,7 +640,7 @@ export default function Leads() {
       <div className="pointer-events-none absolute -top-32 -right-32 h-96 w-96 rounded-full bg-brand-magenta/[0.05] blur-3xl" />
       <div className="pointer-events-none absolute top-1/2 -left-32 h-80 w-80 rounded-full bg-brand-purple/[0.05] blur-3xl" />
 
-      <div className="relative space-y-5 px-1 py-1">
+      <div className="relative space-y-5 px-1 py-1 pb-16">
         {/* ================= HEADER ================= */}
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
@@ -795,6 +865,7 @@ export default function Leads() {
             onToggle={() => {
               setSourceOpen((s) => !s);
               setAgentOpen(false);
+              setRowsOpen(false);
             }}
             onChange={(v) => {
               setSourceFilter(v);
@@ -811,10 +882,28 @@ export default function Leads() {
             onToggle={() => {
               setAgentOpen((s) => !s);
               setSourceOpen(false);
+              setRowsOpen(false);
             }}
             onChange={(v) => {
               setAgentFilter(v);
               setAgentOpen(false);
+            }}
+          />
+
+          <DropdownFilter
+            label="Rows"
+            icon={List}
+            value={String(pageSize)}
+            options={PAGE_SIZE_OPTIONS.map(String)}
+            open={rowsOpen}
+            onToggle={() => {
+              setRowsOpen((s) => !s);
+              setSourceOpen(false);
+              setAgentOpen(false);
+            }}
+            onChange={(v) => {
+              setPageSize(Number(v));
+              setRowsOpen(false);
             }}
           />
 
@@ -924,7 +1013,7 @@ export default function Leads() {
           <EmptyState hasFilters={hasFilters || activeTab !== 'all'} onClear={clearFilters} tab={activeTab} />
         ) : activeTab === 'duplicate' ? (
           <div className="space-y-4">
-            {Object.entries(groupedLeads).map(([mobile, group]) => (
+            {pagedDuplicateGroups.map(([mobile, group]) => (
               <div key={mobile} className="card !p-4">
                 <div className="mb-3 flex items-center justify-between">
                   <div className="flex items-center gap-2">
@@ -977,7 +1066,7 @@ export default function Leads() {
           </div>
         ) : (
           <div className="space-y-6">
-            {Object.entries(groupedLeads).map(([groupName, groupLeads]) => (
+            {Object.entries(pagedGroups).map(([groupName, groupLeads]) => (
               <div key={groupName} className="space-y-3">
                 {groupView !== 'all' && (
                   <div className="flex items-center gap-2">
@@ -1024,6 +1113,79 @@ export default function Leads() {
                 </div>
               </div>
             ))}
+          </div>
+        )}
+
+        {/* ================= PAGINATION ================= */}
+        {totalItems > 0 && (
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-brand-lilac bg-white px-4 py-3 shadow-[0_4px_16px_-8px_rgba(139,47,214,0.15)]">
+            <p className="text-xs text-brand-ink/60">
+              Showing <span className="font-bold text-brand-ink">{startIdx + 1}–{endIdx}</span> of{' '}
+              <span className="font-bold text-brand-magenta">{totalItems}</span>{' '}
+              {activeTab === 'duplicate' ? 'duplicate groups' : 'leads'}
+            </p>
+
+            {totalPages > 1 && (
+              <nav aria-label="Pagination" className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => setPage(1)}
+                  disabled={safePage === 1}
+                  aria-label="First page"
+                  className="flex h-8 w-8 items-center justify-center rounded-lg border border-brand-lilac bg-white text-brand-ink/60 transition-all hover:border-brand-magenta/40 hover:text-brand-magenta disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  <ChevronsLeft size={14} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPage(Math.max(1, safePage - 1))}
+                  disabled={safePage === 1}
+                  aria-label="Previous page"
+                  className="flex h-8 w-8 items-center justify-center rounded-lg border border-brand-lilac bg-white text-brand-ink/60 transition-all hover:border-brand-magenta/40 hover:text-brand-magenta disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  <ChevronLeft size={14} />
+                </button>
+
+                {getPageNumbers(safePage, totalPages).map((p, i) =>
+                  p === '…' ? (
+                    <span key={`dots-${i}`} className="px-1.5 text-xs font-bold text-brand-ink/40">…</span>
+                  ) : (
+                    <button
+                      key={p}
+                      type="button"
+                      onClick={() => setPage(p)}
+                      aria-current={p === safePage ? 'page' : undefined}
+                      className={`h-8 min-w-[32px] rounded-lg px-2 text-xs font-bold transition-all ${
+                        p === safePage
+                          ? 'bg-gradient-to-r from-brand-magenta to-brand-purple text-white shadow-[0_4px_14px_-4px_rgba(227,28,121,0.5)]'
+                          : 'border border-brand-lilac bg-white text-brand-ink/70 hover:border-brand-magenta/40 hover:text-brand-magenta'
+                      }`}
+                    >
+                      {p}
+                    </button>
+                  )
+                )}
+
+                <button
+                  type="button"
+                  onClick={() => setPage(Math.min(totalPages, safePage + 1))}
+                  disabled={safePage === totalPages}
+                  aria-label="Next page"
+                  className="flex h-8 w-8 items-center justify-center rounded-lg border border-brand-lilac bg-white text-brand-ink/60 transition-all hover:border-brand-magenta/40 hover:text-brand-magenta disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  <ChevronRight size={14} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPage(totalPages)}
+                  disabled={safePage === totalPages}
+                  aria-label="Last page"
+                  className="flex h-8 w-8 items-center justify-center rounded-lg border border-brand-lilac bg-white text-brand-ink/60 transition-all hover:border-brand-magenta/40 hover:text-brand-magenta disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  <ChevronsRight size={14} />
+                </button>
+              </nav>
+            )}
           </div>
         )}
 
@@ -1570,6 +1732,8 @@ function MergeDuplicateModal({ mobile, leads, onClose, onMerge }) {
    LEAD DRAWER
    ================================================================ */
 function LeadDrawer({ lead, agents, onAssign, onCall, onFollowUp, onAddNote, onEdit, onHistory, onClose }) {
+  useLockBodyScroll();
+
   const recordings = useMemo(
     () => [
       { id: 1, type: 'inbound', duration: '3:42', date: 'Today · 10:24 AM', agent: lead.assignedAgent || 'Unassigned', summary: 'Discussing pricing options.' },
@@ -1589,8 +1753,8 @@ function LeadDrawer({ lead, agents, onAssign, onCall, onFollowUp, onAddNote, onE
   );
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end bg-black/40">
-      <div className="h-full w-full max-w-lg overflow-y-auto bg-white shadow-panel">
+    <div className="fixed inset-0 z-50 flex justify-end overflow-hidden bg-black/40">
+      <div className="h-full w-full max-w-lg overflow-y-auto overscroll-contain bg-white shadow-panel">
         <div className="sticky top-0 z-10 flex items-center justify-between border-b border-brand-lilac bg-white p-5">
           <h3 className="font-display text-lg font-semibold text-brand-ink">Lead Details</h3>
           <button onClick={onClose} className="rounded-lg p-2 text-brand-ink/50 hover:bg-brand-lilac">
@@ -1760,6 +1924,7 @@ function RecordingRow({ rec }) {
    CALL MODAL
    ================================================================ */
 function CallModal({ target, onClose, onEnd }) {
+  useLockBodyScroll();
   const [callState, setCallState] = useState('ringing');
   const [seconds, setSeconds] = useState(0);
   const [muted, setMuted] = useState(false);
@@ -1910,6 +2075,7 @@ function CallControl({ icon: Icon, label, active, onClick }) {
    FOLLOW-UP MODAL
    ================================================================ */
 function FollowUpModal({ lead, onClose, onSave }) {
+  useLockBodyScroll();
   const today = new Date().toISOString().slice(0, 10);
   const [date, setDate] = useState(today);
   const [time, setTime] = useState('10:00');
@@ -2008,6 +2174,7 @@ function FollowUpModal({ lead, onClose, onSave }) {
    BULK ASSIGN MODAL
    ================================================================ */
 function BulkAssignModal({ agents, count, onAssign, onClose }) {
+  useLockBodyScroll();
   const [selectedAgent, setSelectedAgent] = useState('');
 
   return (
@@ -2067,6 +2234,7 @@ function BulkAssignModal({ agents, count, onAssign, onClose }) {
    ADD LEAD MODAL
    ================================================================ */
 function AddLeadModal({ agents, onSave, onClose }) {
+  useLockBodyScroll();
   const [form, setForm] = useState({
     name: '',
     mobile: '',
@@ -2238,6 +2406,7 @@ function EditLeadModal({ lead, agents, onSave, onClose }) {
    HISTORY MODAL
    ================================================================ */
 function HistoryModal({ lead, onClose }) {
+  useLockBodyScroll();
   const events = [
     { icon: Plus, label: 'Lead created', at: '3 days ago', color: 'bg-violet-100 text-brand-purple' },
     { icon: UserCheck, label: `Assigned to ${lead.assignedAgent || 'Unassigned'}`, at: '2 days ago', color: 'bg-emerald-100 text-emerald-600' },
@@ -2295,6 +2464,7 @@ function HistoryModal({ lead, onClose }) {
    NOTES MODAL
    ================================================================ */
 function NotesModal({ lead, onSave, onClose }) {
+  useLockBodyScroll();
   const [text, setText] = useState('');
 
   return (
@@ -2356,6 +2526,7 @@ function NotesModal({ lead, onSave, onClose }) {
    IMPORT MODAL
    ================================================================ */
 function ImportModal({ onClose, onImport }) {
+  useLockBodyScroll();
   const [file, setFile] = useState(null);
   const [parsedRows, setParsedRows] = useState([]);
   const [parsing, setParsing] = useState(false);
@@ -2550,6 +2721,7 @@ function parseCSV(text) {
    CONFIRM DIALOG
    ================================================================ */
 function ConfirmDialog({ title, message, confirmLabel, onCancel, onConfirm }) {
+  useLockBodyScroll();
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
       <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-panel">

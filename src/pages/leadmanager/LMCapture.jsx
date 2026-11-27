@@ -5,6 +5,9 @@ import {
   Phone, MessageCircle, Share2, FileSpreadsheet, PlusCircle, Mail, Filter,
   CheckCircle2, AlertCircle, Building2, Upload, Download, CalendarDays,
   Radio, Users, Clock, Zap,
+  Eye, Pencil, Trash2, Grid3x3, List, UserCheck, UserPlus, Briefcase,
+  Activity, MessageSquare, User, MapPin, Calendar, Sparkles, Target,
+  ChevronsLeft, ChevronsRight,
 } from 'lucide-react';
 
 import { useAuth } from '../../context/AuthContext';
@@ -13,7 +16,7 @@ import { AGENTS, LEADS } from '../../data/mockData';
 /* ═══════════════════════════════════════════════════════════════
    CONSTANTS
    ═══════════════════════════════════════════════════════════════ */
-const PAGE_SIZE = 10;
+const PAGE_SIZE_OPTIONS = [10, 25, 50];
 
 const norm = (v) => String(v ?? '').toLowerCase().replace(/[\s_-]+/g, '');
 const isAssigned = (l) => !!l.assignedAgent && norm(l.assignedAgent) !== 'unassigned';
@@ -88,7 +91,25 @@ const statusMeta = (s) => {
   return hit ? { label: hit[0], tone: hit[1] } : { label: s || 'New', tone: 'purple' };
 };
 
+/* Canonical status list (value stored on the lead) */
+const STATUS_OPTIONS = [
+  { value: 'Fresh',          label: 'New',            tone: 'purple' },
+  { value: 'Contacted',      label: 'Contacted',      tone: 'purple' },
+  { value: 'Interested',     label: 'Interested',     tone: 'rose' },
+  { value: 'Follow-up',      label: 'Follow-up',      tone: 'amber' },
+  { value: 'Qualified',      label: 'Qualified',      tone: 'emerald' },
+  { value: 'Won',            label: 'Converted',      tone: 'emerald' },
+  { value: 'Not Interested', label: 'Not Interested', tone: 'rose' },
+  { value: 'Lost',           label: 'Lost',           tone: 'slate' },
+  { value: 'Closed',         label: 'Closed',         tone: 'slate' },
+];
+const sameStatus = (a, b) => statusMeta(a).label === statusMeta(b).label;
+
 const CSV_TEMPLATE = 'Name,Phone,Email,Source,Campaign,Project\nAsha Menon,+91 98765 43210,asha@email.com,Google Ads,Diwali Offer,Main Project\n';
+
+/* Shared column template so the header and every row line up */
+const LIST_GRID =
+  'grid items-center gap-4 grid-cols-[20px_minmax(0,2fr)_minmax(0,1.6fr)_minmax(0,1.2fr)_100px_215px]';
 
 /* ═══════════════════════════════════════════════════════════════
    HELPERS
@@ -113,6 +134,19 @@ const formatDate = (d) => {
     : new Date(t).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
 };
 const startOfToday = () => { const d = new Date(); d.setHours(0, 0, 0, 0); return d.getTime(); };
+
+/* Page numbers with ellipsis, e.g. [1, '…', 4, 5, 6, '…', 12] */
+function getPageNumbers(current, total) {
+  if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
+  const pages = new Set([1, total, current - 1, current, current + 1]);
+  const sorted = [...pages].filter((p) => p >= 1 && p <= total).sort((a, b) => a - b);
+  const out = [];
+  sorted.forEach((p, i) => {
+    if (i > 0 && p - sorted[i - 1] > 1) out.push('…');
+    out.push(p);
+  });
+  return out;
+}
 
 /* Minimal RFC-4180 style CSV parser (handles quotes and embedded commas/newlines) */
 const parseCsv = (text) => {
@@ -161,17 +195,28 @@ export default function LMCapture({ view: initialView = 'all' }) {
   const [campaignFilter, setCampaignFilter] = useState('all');
   const [sortBy, setSortBy] = useState('newest');
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(PAGE_SIZE_OPTIONS[0]);
+  const [selected, setSelected] = useState(() => new Set());
+  const [bulkAgent, setBulkAgent] = useState('');
+  const [editingLead, setEditingLead] = useState(null);
+  const [viewingId, setViewingId] = useState(null);
+  const [confirmDelete, setConfirmDelete] = useState(null);
+  const [viewMode, setViewMode] = useState('list'); // 'list' | 'grid'
   const [toast, setToast] = useState(null);
   const toastTimerRef = useRef(null);
 
   /* Reset when project or the routed view changes */
   useEffect(() => {
     setLeads((LEADS || []).filter((l) => l.websiteId === activeWebsiteId));
+    setSelected(new Set());
     setPage(1);
   }, [activeWebsiteId]);
 
   useEffect(() => { setActiveView(initialView); }, [initialView]);
-  useEffect(() => { setPage(1); }, [activeView, search, sourceFilter, campaignFilter, sortBy]);
+  useEffect(() => {
+    setPage(1);
+    setSelected(new Set());
+  }, [activeView, search, sourceFilter, campaignFilter, sortBy, pageSize]);
   useEffect(() => () => { if (toastTimerRef.current) clearTimeout(toastTimerRef.current); }, []);
 
   const showToast = useCallback((msg, type = 'success') => {
@@ -247,9 +292,11 @@ export default function LMCapture({ view: initialView = 'all' }) {
     return sorted;
   }, [leads, currentView, search, sourceFilter, campaignFilter, sortBy]);
 
-  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const safePage = Math.min(page, totalPages);
-  const pageRows = filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
+  const startIdx = (safePage - 1) * pageSize;
+  const endIdx = Math.min(safePage * pageSize, filtered.length);
+  const pageRows = filtered.slice(startIdx, startIdx + pageSize);
 
   /* ========== ACTIONS ========== */
   const buildLead = useCallback((form, idSuffix = '') => ({
@@ -271,6 +318,64 @@ export default function LMCapture({ view: initialView = 'all' }) {
     setLeads((prev) => [...prev, buildLead(form)]);
     showToast('Lead captured successfully');
     setActiveView(channelOf({ leadSource: form.source || 'Manual Entry' }).key);
+  };
+
+  /* Drawer always reads the latest copy of the lead */
+  const viewingLead = viewingId ? leads.find((l) => l.id === viewingId) : null;
+
+  const updateLead = useCallback((id, patch) => {
+    setLeads((prev) => prev.map((l) => (l.id === id ? { ...l, ...patch } : l)));
+  }, []);
+
+  const handleStatusChange = (lead, value) => {
+    if (sameStatus(lead.status, value)) return;
+    updateLead(lead.id, { status: value });
+    showToast(`${lead.name} marked as ${statusMeta(value).label}`);
+  };
+
+  const handleAgentChange = (lead, value) => {
+    updateLead(lead.id, { assignedAgent: value || 'Unassigned' });
+    showToast(value ? `${lead.name} assigned to ${value}` : `${lead.name} unassigned`);
+  };
+
+  const toggleRow = (id) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const allOnPageSelected = pageRows.length > 0 && pageRows.every((l) => selected.has(l.id));
+
+  const toggleAllOnPage = () => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (allOnPageSelected) pageRows.forEach((l) => next.delete(l.id));
+      else pageRows.forEach((l) => next.add(l.id));
+      return next;
+    });
+  };
+
+  const handleBulkAssign = () => {
+    if (!bulkAgent || selected.size === 0) return;
+    setLeads((prev) => prev.map((l) => (selected.has(l.id) ? { ...l, assignedAgent: bulkAgent } : l)));
+    showToast(`${selected.size} lead${selected.size > 1 ? 's' : ''} assigned to ${bulkAgent}`);
+    setSelected(new Set());
+    setBulkAgent('');
+  };
+
+  const handleEditLead = (id, updates) => {
+    updateLead(id, updates);
+    setEditingLead(null);
+    showToast('Lead updated successfully');
+  };
+
+  const handleDeleteLead = (id) => {
+    setLeads((prev) => prev.filter((l) => l.id !== id));
+    setSelected((prev) => { const next = new Set(prev); next.delete(id); return next; });
+    setConfirmDelete(null);
+    showToast('Lead deleted', 'error');
   };
 
   const handleImport = (file) => {
@@ -419,6 +524,23 @@ export default function LMCapture({ view: initialView = 'all' }) {
                 </button>
               );
             })}
+
+            {!isForm && (
+              <div className="ml-auto flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setViewMode('grid')}
+                  className={`rounded-full border p-1.5 transition-all ${viewMode === 'grid' ? 'border-brand-magenta bg-brand-magenta/10 text-brand-magenta' : 'border-brand-lilac text-brand-ink/50 hover:bg-brand-lilac/30'}`}
+                  title="Grid view"
+                ><Grid3x3 size={14} /></button>
+                <button
+                  type="button"
+                  onClick={() => setViewMode('list')}
+                  className={`rounded-full border p-1.5 transition-all ${viewMode === 'list' ? 'border-brand-magenta bg-brand-magenta/10 text-brand-magenta' : 'border-brand-lilac text-brand-ink/50 hover:bg-brand-lilac/30'}`}
+                  title="List view"
+                ><List size={14} /></button>
+              </div>
+            )}
           </div>
         </div>
 
@@ -507,6 +629,10 @@ export default function LMCapture({ view: initialView = 'all' }) {
                 <option value="source">Source</option>
               </SelectBox>
 
+              <SelectBox icon={List} value={String(pageSize)} onChange={(v) => setPageSize(Number(v))} label="Rows per page">
+                {PAGE_SIZE_OPTIONS.map((n) => <option key={n} value={n}>{n} rows</option>)}
+              </SelectBox>
+
               {filtersActive && (
                 <button
                   type="button"
@@ -518,113 +644,169 @@ export default function LMCapture({ view: initialView = 'all' }) {
               )}
             </div>
 
-            {/* Table */}
+            {/* Bulk bar */}
+            {selected.size > 0 && (
+              <div className="mb-4 flex flex-wrap items-center gap-2 rounded-xl border border-brand-magenta/30 bg-gradient-to-r from-brand-magenta/[0.08] to-brand-purple/[0.06] px-4 py-2.5">
+                <span className="text-xs font-bold text-brand-ink">{selected.size} selected</span>
+                <select
+                  value={bulkAgent}
+                  onChange={(e) => setBulkAgent(e.target.value)}
+                  aria-label="Assign selected leads to agent"
+                  className="rounded-full border border-brand-lilac bg-white px-3 py-1.5 text-xs font-semibold text-brand-ink focus:outline-none focus:ring-2 focus:ring-brand-magenta/30"
+                >
+                  <option value="">Assign to agent…</option>
+                  {agents.map((a) => <option key={a.id} value={a.name}>{a.name}</option>)}
+                </select>
+                <button
+                  type="button"
+                  onClick={handleBulkAssign}
+                  disabled={!bulkAgent}
+                  className="inline-flex items-center gap-1.5 rounded-full bg-gradient-to-r from-brand-magenta to-brand-purple px-3.5 py-1.5 text-xs font-semibold text-white shadow-sm transition-all disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  <UserPlus size={12} /> Assign
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSelected(new Set())}
+                  className="ml-auto text-xs font-semibold text-brand-ink/60 hover:text-brand-magenta"
+                >
+                  Clear selection
+                </button>
+              </div>
+            )}
+
+            {/* Content */}
             {pageRows.length === 0 ? (
               <EmptyState message={filtersActive ? 'No leads match your filters' : `No ${currentView.label.toLowerCase()} yet`} />
+            ) : viewMode === 'grid' ? (
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+                {pageRows.map((l) => (
+                  <LeadCard
+                    key={l.id}
+                    lead={l}
+                    agents={agents}
+                    onView={() => setViewingId(l.id)}
+                    onEdit={() => setEditingLead(l)}
+                    onDelete={() => setConfirmDelete(l)}
+                    onAgentChange={handleAgentChange}
+                  />
+                ))}
+              </div>
             ) : (
-              <div className="overflow-x-auto rounded-xl border border-brand-lilac/70">
-                <table className="w-full min-w-[900px] text-left text-xs">
-                  <thead className="bg-gradient-to-r from-brand-mist/70 to-transparent">
-                    <tr className="font-mono text-[10px] uppercase tracking-wider text-brand-ink/50">
-                      <th className="px-3 py-3">Lead</th>
-                      <th className="px-3 py-3">Contact</th>
-                      <th className="px-3 py-3">Source</th>
-                      <th className="px-3 py-3">Campaign</th>
-                      <th className="px-3 py-3">Project</th>
-                      <th className="px-3 py-3">Captured On</th>
-                      <th className="px-3 py-3">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {pageRows.map((l) => {
-                      const ch = channelOf(l);
-                      const ChIcon = ch.icon;
-                      const st = statusMeta(l.status);
-                      return (
-                        <tr key={l.id} className="border-t border-brand-lilac/50 transition-colors hover:bg-brand-mist/50">
-                          <td className="px-3 py-3">
-                            <div className="flex items-center gap-2.5">
-                              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-brand-magenta to-brand-purple text-[10px] font-bold text-white shadow-sm">
-                                {initials(l.name)}
-                              </span>
-                              <div className="min-w-0">
-                                <p className="truncate text-sm font-semibold text-brand-ink">{l.name || 'Unnamed lead'}</p>
-                                {isAssigned(l) && (
-                                  <p className="flex items-center gap-1 truncate font-mono text-[10px] text-brand-ink/50">
-                                    <Users size={9} /> {l.assignedAgent}
-                                  </p>
-                                )}
-                              </div>
-                            </div>
-                          </td>
-                          <td className="px-3 py-3">
-                            {leadPhone(l) && (
-                              <p className="flex items-center gap-1.5 font-medium text-brand-ink/80">
-                                <Phone size={11} className="text-brand-purple" /> {leadPhone(l)}
-                              </p>
-                            )}
-                            {leadEmail(l) && (
-                              <p className="mt-0.5 flex items-center gap-1.5 text-brand-ink/60">
-                                <Mail size={11} className="text-brand-magenta" /> <span className="truncate">{leadEmail(l)}</span>
-                              </p>
-                            )}
-                            {!leadPhone(l) && !leadEmail(l) && <span className="text-brand-ink/30">—</span>}
-                          </td>
-                          <td className="px-3 py-3">
-                            <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-bold ring-1 ${TONES[ch.tone]}`}>
-                              <ChIcon size={11} /> {leadSource(l)}
-                            </span>
-                          </td>
-                          <td className="px-3 py-3 font-medium text-brand-ink/70">
-                            {leadCampaign(l) || <span className="text-brand-ink/30">—</span>}
-                          </td>
-                          <td className="px-3 py-3 font-medium text-brand-ink/70">
-                            {l.project || <span className="text-brand-ink/30">—</span>}
-                          </td>
-                          <td className="px-3 py-3 font-mono text-[11px] text-brand-ink/60">{formatDate(leadDate(l))}</td>
-                          <td className="px-3 py-3">
-                            <span className={`rounded-full px-2.5 py-1 text-[10px] font-bold ring-1 ${TONES[st.tone]}`}>
-                              {st.label}
-                            </span>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+             <div className="overflow-hidden rounded-xl border border-brand-lilac/70 bg-white">
+                {/* Header */}
+                <div className={`${LIST_GRID} border-b border-brand-lilac/70 bg-gradient-to-r from-brand-mist/70 to-transparent px-4 py-3 font-mono text-[10px] uppercase tracking-wider text-brand-ink/50`}>
+                  <input
+                    type="checkbox"
+                    checked={allOnPageSelected}
+                    onChange={toggleAllOnPage}
+                    aria-label="Select all leads on this page"
+                    className="h-4 w-4 accent-[#E31C79]"
+                  />
+                  <span>Lead</span>
+                  <span>Contact</span>
+                  <span>Source</span>
+                  <span>Status</span>
+                  <span className="text-right">Actions</span>
+                </div>
+
+                {/* Rows */}
+                {pageRows.map((l) => (
+                  <LeadRow
+                    key={l.id}
+                    lead={l}
+                    selected={selected}
+                    onToggle={toggleRow}
+                    onView={() => setViewingId(l.id)}
+                    onEdit={() => setEditingLead(l)}
+                    onDelete={() => setConfirmDelete(l)}
+                  />
+                ))}
               </div>
             )}
 
             {/* Pagination */}
             {filtered.length > 0 && (
-              <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
-                <p className="font-mono text-[10px] uppercase tracking-wider text-brand-ink/50">
-                  Showing {(safePage - 1) * PAGE_SIZE + 1}–{Math.min(safePage * PAGE_SIZE, filtered.length)} of {filtered.length}
+              <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-brand-lilac bg-white px-4 py-3 shadow-[0_4px_16px_-8px_rgba(139,47,214,0.15)]">
+                <p className="text-xs text-brand-ink/60">
+                  Showing <span className="font-bold text-brand-ink">{startIdx + 1}–{endIdx}</span> of{' '}
+                  <span className="font-bold text-brand-magenta">{filtered.length}</span> leads
                 </p>
-                <div className="flex items-center gap-1.5">
-                  <button
-                    type="button"
-                    onClick={() => setPage(Math.max(1, safePage - 1))}
-                    disabled={safePage === 1}
-                    aria-label="Previous page"
-                    className="rounded-full border border-brand-lilac bg-white p-2 text-brand-ink/60 transition-all hover:border-brand-magenta/40 hover:text-brand-magenta disabled:cursor-not-allowed disabled:opacity-40"
-                  >
-                    <ChevronLeft size={14} />
-                  </button>
-                  <span className="px-2 text-xs font-bold text-brand-ink">{safePage} / {totalPages}</span>
-                  <button
-                    type="button"
-                    onClick={() => setPage(Math.min(totalPages, safePage + 1))}
-                    disabled={safePage === totalPages}
-                    aria-label="Next page"
-                    className="rounded-full border border-brand-lilac bg-white p-2 text-brand-ink/60 transition-all hover:border-brand-magenta/40 hover:text-brand-magenta disabled:cursor-not-allowed disabled:opacity-40"
-                  >
-                    <ChevronRight size={14} />
-                  </button>
-                </div>
+
+                {totalPages > 1 && (
+                  <nav aria-label="Pagination" className="flex items-center gap-1">
+                    <button type="button" onClick={() => setPage(1)} disabled={safePage === 1} aria-label="First page"
+                      className="flex h-8 w-8 items-center justify-center rounded-lg border border-brand-lilac bg-white text-brand-ink/60 transition-all hover:border-brand-magenta/40 hover:text-brand-magenta disabled:cursor-not-allowed disabled:opacity-40">
+                      <ChevronsLeft size={14} />
+                    </button>
+                    <button type="button" onClick={() => setPage(Math.max(1, safePage - 1))} disabled={safePage === 1} aria-label="Previous page"
+                      className="flex h-8 w-8 items-center justify-center rounded-lg border border-brand-lilac bg-white text-brand-ink/60 transition-all hover:border-brand-magenta/40 hover:text-brand-magenta disabled:cursor-not-allowed disabled:opacity-40">
+                      <ChevronLeft size={14} />
+                    </button>
+
+                    {getPageNumbers(safePage, totalPages).map((p, i) =>
+                      p === '…' ? (
+                        <span key={`dots-${i}`} className="px-1.5 text-xs font-bold text-brand-ink/40">…</span>
+                      ) : (
+                        <button
+                          key={p}
+                          type="button"
+                          onClick={() => setPage(p)}
+                          aria-current={p === safePage ? 'page' : undefined}
+                          className={`h-8 min-w-[32px] rounded-lg px-2 text-xs font-bold transition-all ${
+                            p === safePage
+                              ? 'bg-gradient-to-r from-brand-magenta to-brand-purple text-white shadow-[0_4px_14px_-4px_rgba(227,28,121,0.5)]'
+                              : 'border border-brand-lilac bg-white text-brand-ink/70 hover:border-brand-magenta/40 hover:text-brand-magenta'
+                          }`}
+                        >
+                          {p}
+                        </button>
+                      )
+                    )}
+
+                    <button type="button" onClick={() => setPage(Math.min(totalPages, safePage + 1))} disabled={safePage === totalPages} aria-label="Next page"
+                      className="flex h-8 w-8 items-center justify-center rounded-lg border border-brand-lilac bg-white text-brand-ink/60 transition-all hover:border-brand-magenta/40 hover:text-brand-magenta disabled:cursor-not-allowed disabled:opacity-40">
+                      <ChevronRight size={14} />
+                    </button>
+                    <button type="button" onClick={() => setPage(totalPages)} disabled={safePage === totalPages} aria-label="Last page"
+                      className="flex h-8 w-8 items-center justify-center rounded-lg border border-brand-lilac bg-white text-brand-ink/60 transition-all hover:border-brand-magenta/40 hover:text-brand-magenta disabled:cursor-not-allowed disabled:opacity-40">
+                      <ChevronsRight size={14} />
+                    </button>
+                  </nav>
+                )}
               </div>
             )}
           </Panel>
+        )}
+
+        {/* MODALS & DRAWERS */}
+        {editingLead && (
+          <EditLeadModal
+            lead={editingLead}
+            agents={agents}
+            sources={sources}
+            onClose={() => setEditingLead(null)}
+            onSubmit={(data) => handleEditLead(editingLead.id, data)}
+          />
+        )}
+
+        {viewingLead && (
+          <LeadDetailDrawer
+            lead={viewingLead}
+            onClose={() => setViewingId(null)}
+            onEdit={() => { setEditingLead(viewingLead); setViewingId(null); }}
+            onStatusChange={(s) => handleStatusChange(viewingLead, s)}
+          />
+        )}
+
+        {confirmDelete && (
+          <ConfirmDialog
+            title={`Delete "${confirmDelete.name}"?`}
+            message="This will permanently delete this lead. This action cannot be undone."
+            confirmLabel="Delete Lead"
+            onCancel={() => setConfirmDelete(null)}
+            onConfirm={() => handleDeleteLead(confirmDelete.id)}
+          />
         )}
 
         {toast && <Toast message={toast.msg} type={toast.type} />}
@@ -806,6 +988,553 @@ function ImportPanel({ onFile, onTemplate }) {
         <p className="text-[11px] text-brand-ink/50">Rows need a name and a phone or email. Invalid rows are skipped.</p>
       </div>
     </Panel>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   SCROLL LOCK (stops the page behind a drawer/modal from scrolling)
+   ═══════════════════════════════════════════════════════════════ */
+function useLockBodyScroll() {
+  useEffect(() => {
+    const scrollY = window.scrollY;
+    const prevBody = document.body.style.overflow;
+    const prevHtml = document.documentElement.style.overflow;
+    document.body.style.overflow = 'hidden';
+    document.documentElement.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = prevBody;
+      document.documentElement.style.overflow = prevHtml;
+      window.scrollTo(0, scrollY);
+    };
+  }, []);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   LEAD CARD (GRID)
+   ═══════════════════════════════════════════════════════════════ */
+function LeadCard({ lead: l, agents, onView, onEdit, onDelete, onAgentChange }) {
+  const meta = statusMeta(l.status);
+
+  return (
+    <div className="group relative flex flex-col rounded-2xl border-2 border-brand-lilac/80 bg-white shadow-sm transition-all duration-500 hover:-translate-y-1.5 hover:border-brand-magenta/50 hover:shadow-[0_20px_45px_-15px_rgba(227,28,121,0.25)]">
+      <span className="pointer-events-none absolute inset-x-0 top-0 h-1 origin-left scale-x-0 rounded-t-2xl bg-gradient-to-r from-brand-magenta to-brand-purple transition-transform duration-500 group-hover:scale-x-100" />
+
+      <div className="relative flex flex-1 flex-col p-5">
+        <div className="flex items-start gap-3">
+          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-brand-magenta to-brand-purple text-white shadow-md transition-transform duration-500 group-hover:scale-110 group-hover:rotate-3">
+            {initials(l.name)}
+          </div>
+          <div className="min-w-0 flex-1">
+            <button type="button" onClick={onView} className="block w-full truncate text-left font-display text-base font-semibold text-brand-ink hover:text-brand-magenta">
+              {l.name || 'Unnamed lead'}
+            </button>
+            <p className="truncate text-[11px] font-mono text-brand-ink/50">{l.id}</p>
+          </div>
+          <span className={`shrink-0 rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider ring-1 ${TONES[meta.tone]}`}>
+            {meta.label}
+          </span>
+        </div>
+
+        <div className="mt-4 space-y-2 rounded-xl border border-brand-lilac/60 bg-gradient-to-br from-brand-mist/80 to-brand-mist/40 p-3 text-xs">
+          <div className="grid grid-cols-[auto_1fr_auto] items-center gap-2">
+            <Phone size={11} className="shrink-0 text-brand-ink/50" />
+            <span className="truncate text-brand-ink/50">Phone</span>
+            <span className="truncate text-right font-semibold text-brand-ink">{leadPhone(l) || '—'}</span>
+          </div>
+          <div className="grid grid-cols-[auto_1fr_auto] items-center gap-2">
+            <Mail size={11} className="shrink-0 text-brand-ink/50" />
+            <span className="truncate text-brand-ink/50">Email</span>
+            <span className="truncate text-right font-semibold text-brand-ink" title={leadEmail(l)}>{leadEmail(l) || '—'}</span>
+          </div>
+          <div className="grid grid-cols-[auto_1fr_auto] items-center gap-2">
+            <Globe size={11} className="shrink-0 text-brand-ink/50" />
+            <span className="truncate text-brand-ink/50">Source</span>
+            <span className="truncate text-right font-semibold text-brand-ink">{leadSource(l)}</span>
+          </div>
+          <div className="grid grid-cols-[auto_1fr_auto] items-center gap-2">
+            <Megaphone size={11} className="shrink-0 text-brand-ink/50" />
+            <span className="truncate text-brand-ink/50">Campaign</span>
+            <span className="truncate text-right font-semibold text-brand-ink">{leadCampaign(l) || '—'}</span>
+          </div>
+        </div>
+
+        <div className="mt-3 grid grid-cols-2 items-center gap-2 rounded-xl border border-brand-lilac/60 bg-brand-mist/40 px-3 py-2">
+          <div className="min-w-0">
+            <p className="font-mono text-[9px] uppercase tracking-wider text-brand-ink/50">Captured</p>
+            <p className="truncate font-display text-sm font-bold text-brand-ink">{formatDate(leadDate(l))}</p>
+          </div>
+          <div className="flex justify-end">
+            <select
+              value={isAssigned(l) ? l.assignedAgent : ''}
+              onChange={(e) => onAgentChange(l, e.target.value)}
+              className={`max-w-[120px] rounded-full border px-2 py-1 text-[10px] font-semibold focus:outline-none focus:ring-2 focus:ring-brand-magenta/30 ${isAssigned(l) ? 'border-brand-lilac bg-white text-brand-ink' : 'border-amber-200 bg-amber-50 text-amber-700'}`}
+            >
+              <option value="">Unassigned</option>
+              {agents.map((a) => <option key={a.id} value={a.name}>{a.name}</option>)}
+            </select>
+          </div>
+        </div>
+
+        <div className="mt-4 grid grid-cols-3 gap-2">
+          <button type="button" onClick={onView} className="flex min-w-0 items-center justify-center gap-1.5 rounded-xl border border-brand-lilac bg-white px-2 py-2 text-xs font-semibold text-brand-ink transition-all hover:border-brand-magenta/40 hover:bg-brand-magenta/5 hover:text-brand-magenta" title="View details">
+            <Eye size={12} className="shrink-0" /> <span className="truncate">View</span>
+          </button>
+          <button type="button" onClick={onEdit} className="flex min-w-0 items-center justify-center gap-1.5 rounded-xl bg-gradient-to-r from-brand-magenta to-brand-purple px-2 py-2 text-xs font-semibold text-white shadow-card transition-all hover:brightness-110" title="Edit lead">
+            <Pencil size={12} className="shrink-0" /> <span className="truncate">Edit</span>
+          </button>
+          <button type="button" onClick={onDelete} className="flex min-w-0 items-center justify-center gap-1.5 rounded-xl border border-rose-200 bg-rose-50 px-2 py-2 text-xs font-semibold text-rose-500 transition-all hover:bg-rose-100" title="Delete lead">
+            <Trash2 size={12} className="shrink-0" /> <span className="truncate">Delete</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   LEAD ROW (LIST)
+   ═══════════════════════════════════════════════════════════════ */
+function LeadRow({ lead: l, selected, onToggle, onView, onEdit, onDelete }) {
+  const meta = statusMeta(l.status);
+  const ch = channelOf(l);
+  const ChIcon = ch.icon;
+  const isSelected = selected.has(l.id);
+
+  return (
+    <div className={`${LIST_GRID} border-b border-brand-lilac/50 px-4 py-3 text-xs transition-colors last:border-b-0 hover:bg-brand-mist/50 ${isSelected ? 'bg-brand-magenta/[0.04]' : ''}`}>
+      <input
+        type="checkbox"
+        checked={isSelected}
+        onChange={() => onToggle(l.id)}
+        aria-label={`Select ${l.name}`}
+        className="h-4 w-4 accent-[#E31C79]"
+      />
+
+      {/* Lead */}
+      <div className="flex min-w-0 items-center gap-3">
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-brand-magenta to-brand-purple text-[11px] font-bold text-white shadow-sm">
+          {initials(l.name)}
+        </span>
+        <div className="min-w-0">
+          <button type="button" onClick={onView} className="block max-w-full truncate text-left text-sm font-semibold text-brand-ink hover:text-brand-magenta">
+            {l.name || 'Unnamed lead'}
+          </button>
+          <p className="truncate font-mono text-[10px] text-brand-ink/50">{l.id}</p>
+        </div>
+      </div>
+
+      {/* Contact */}
+      <div className="min-w-0">
+        <p className="truncate font-medium text-brand-ink/80">{leadPhone(l) || '—'}</p>
+        {leadEmail(l) && <p className="truncate text-[11px] text-brand-ink/50">{leadEmail(l)}</p>}
+      </div>
+
+      {/* Source */}
+      <div className="min-w-0">
+        <span className={`inline-flex max-w-full items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-bold ring-1 ${TONES[ch.tone]}`}>
+          <ChIcon size={11} className="shrink-0" />
+          <span className="truncate">{leadSource(l)}</span>
+        </span>
+      </div>
+
+      {/* Status */}
+      <div>
+        <span className={`inline-flex rounded-full px-2.5 py-1 text-[10px] font-bold uppercase ring-1 ${TONES[meta.tone]}`}>
+          {meta.label}
+        </span>
+      </div>
+
+      {/* Actions */}
+      <div className="flex items-center justify-end gap-1.5">
+        <button type="button" onClick={onView} className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-brand-lilac bg-white px-2.5 text-[11px] font-semibold text-brand-ink transition-all hover:border-brand-magenta/40 hover:bg-brand-magenta/5 hover:text-brand-magenta" title="View details">
+          <Eye size={12} /> View
+        </button>
+        <button type="button" onClick={onEdit} className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-gradient-to-r from-brand-magenta to-brand-purple px-2.5 text-[11px] font-semibold text-white shadow-card transition-all hover:brightness-110" title="Edit lead">
+          <Pencil size={12} /> Edit
+        </button>
+        <button type="button" onClick={onDelete} className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-rose-200 bg-rose-50 px-2.5 text-[11px] font-semibold text-rose-500 transition-all hover:bg-rose-100" title="Delete lead">
+          <Trash2 size={12} /> Delete
+        </button>
+      </div>
+    </div>
+  );
+}
+/* ═══════════════════════════════════════════════════════════════
+   EDIT LEAD MODAL
+   ═══════════════════════════════════════════════════════════════ */
+function EditSection({ icon: Icon, title, children }) {
+  return (
+    <div>
+      <div className="mb-3 flex items-center gap-2 border-b border-brand-lilac/60 pb-1.5">
+        <span className="flex h-6 w-6 items-center justify-center rounded-lg bg-gradient-to-br from-brand-magenta/10 to-brand-purple/10 text-brand-magenta">
+          <Icon size={12} />
+        </span>
+        <h4 className="font-mono text-[10px] font-bold uppercase tracking-wider text-brand-ink/60">{title}</h4>
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function EditLeadModal({ lead, agents, sources, onClose, onSubmit }) {
+  useLockBodyScroll();
+
+  const [form, setForm] = useState({
+    name: lead.name || '',
+    phone: leadPhone(lead),
+    email: leadEmail(lead),
+    source: lead.leadSource || '',
+    assignedAgent: isAssigned(lead) ? lead.assignedAgent : '',
+    campaign: lead.campaign || '',
+    project: lead.project || '',
+    city: lead.city || '',
+    priority: lead.priority || 'Medium',
+    status: STATUS_OPTIONS.find((s) => sameStatus(s.value, lead.status))?.value || 'Fresh',
+    notes: lead.notes || '',
+  });
+  const [error, setError] = useState('');
+
+  const set = (key) => (e) => setForm((f) => ({ ...f, [key]: e.target.value }));
+
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (!form.name.trim()) return setError('Name is required');
+    if (!form.phone.trim() && !form.email.trim()) return setError('Add a phone number or an email');
+    if (form.phone.trim() && form.phone.replace(/\D/g, '').length < 7) return setError('Enter a valid phone number');
+    if (form.email.trim() && !/^\S+@\S+\.\S+$/.test(form.email.trim())) return setError('Enter a valid email address');
+
+    onSubmit({
+      name: form.name.trim(),
+      phone: form.phone.trim(),
+      email: form.email.trim(),
+      leadSource: form.source.trim() || 'Manual Entry',
+      assignedAgent: form.assignedAgent || 'Unassigned',
+      campaign: form.campaign.trim(),
+      project: form.project.trim(),
+      city: form.city.trim(),
+      priority: form.priority,
+      status: form.status,
+      notes: form.notes.trim(),
+    });
+  };
+
+  const inputCls = 'w-full rounded-xl border border-brand-lilac bg-white px-3 py-2.5 text-sm text-brand-ink placeholder:text-brand-ink/40 focus:border-brand-magenta/50 focus:outline-none focus:ring-2 focus:ring-brand-magenta/20';
+  const labelCls = 'mb-1 block font-mono text-[10px] uppercase tracking-wider text-brand-ink/50';
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-label="Edit lead">
+      <div className="absolute inset-0 bg-brand-ink/40 backdrop-blur-sm" onClick={onClose} aria-hidden="true" />
+      <form
+        onSubmit={handleSubmit}
+        className="relative w-full max-w-2xl overflow-hidden rounded-2xl border border-brand-lilac bg-gradient-to-br from-white via-white to-brand-mist/40 shadow-[0_24px_60px_-20px_rgba(139,47,214,0.45)]"
+      >
+        <span className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-brand-magenta to-brand-purple" />
+        <div className="flex items-center justify-between border-b border-brand-lilac/70 px-5 py-4">
+          <div className="flex items-center gap-3">
+            <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-gradient-to-br from-brand-magenta to-brand-purple text-white shadow-[0_4px_12px_-4px_rgba(227,28,121,0.5)]">
+              <Pencil size={15} />
+            </span>
+            <h2 className="font-display text-[15px] font-bold text-brand-ink">Edit Lead</h2>
+          </div>
+          <button type="button" onClick={onClose} aria-label="Close" className="rounded-full p-1.5 text-brand-ink/50 hover:bg-brand-lilac/50 hover:text-brand-magenta">
+            <X size={16} />
+          </button>
+        </div>
+
+        <div className="max-h-[75vh] space-y-6 overflow-y-auto overscroll-contain p-6">
+          <EditSection icon={User} title="Contact Information">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <label className="block">
+                <span className={labelCls}>Name *</span>
+                <input value={form.name} onChange={set('name')} placeholder="Full name" className={inputCls} autoFocus />
+              </label>
+              <label className="block">
+                <span className={labelCls}>Phone</span>
+                <input value={form.phone} onChange={set('phone')} placeholder="+91 98765 43210" className={inputCls} inputMode="tel" />
+              </label>
+              <label className="block">
+                <span className={labelCls}>Email</span>
+                <input value={form.email} onChange={set('email')} placeholder="name@email.com" className={inputCls} type="email" />
+              </label>
+              <label className="block">
+                <span className={labelCls}>City</span>
+                <input value={form.city} onChange={set('city')} placeholder="e.g. Chennai" className={inputCls} />
+              </label>
+            </div>
+          </EditSection>
+
+          <EditSection icon={Target} title="Source & Campaign">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <label className="block">
+                <span className={labelCls}>Source</span>
+                <input value={form.source} onChange={set('source')} list="lm-capture-sources-edit" placeholder="e.g. Google Ads" className={inputCls} />
+                <datalist id="lm-capture-sources-edit">
+                  {Array.from(new Set([...SOURCE_OPTIONS, ...sources])).map((s) => <option key={s} value={s} />)}
+                </datalist>
+              </label>
+              <label className="block">
+                <span className={labelCls}>Campaign</span>
+                <input value={form.campaign} onChange={set('campaign')} placeholder="e.g. Diwali Offer" className={inputCls} />
+              </label>
+              <label className="block">
+                <span className={labelCls}>Project</span>
+                <input value={form.project} onChange={set('project')} placeholder="Project name" className={inputCls} />
+              </label>
+              <label className="block">
+                <span className={labelCls}>Assign to Agent</span>
+                <select value={form.assignedAgent} onChange={set('assignedAgent')} className={inputCls}>
+                  <option value="">Unassigned</option>
+                  {agents.map((a) => <option key={a.id} value={a.name}>{a.name}</option>)}
+                </select>
+              </label>
+            </div>
+          </EditSection>
+
+          <EditSection icon={Sparkles} title="Status & Priority">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <label className="block">
+                <span className={labelCls}>Status</span>
+                <select value={form.status} onChange={set('status')} className={inputCls}>
+                  {STATUS_OPTIONS.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+                </select>
+              </label>
+              <label className="block">
+                <span className={labelCls}>Priority</span>
+                <select value={form.priority} onChange={set('priority')} className={inputCls}>
+                  <option value="High">High</option>
+                  <option value="Medium">Medium</option>
+                  <option value="Low">Low</option>
+                </select>
+              </label>
+            </div>
+          </EditSection>
+
+          <EditSection icon={MessageSquare} title="Notes">
+            <textarea value={form.notes} onChange={set('notes')} placeholder="Add any context..." rows={3} className={`${inputCls} resize-none`} />
+          </EditSection>
+
+          {error && (
+            <p className="flex items-center gap-1.5 text-xs font-semibold text-rose-600">
+              <AlertCircle size={13} /> {error}
+            </p>
+          )}
+        </div>
+
+        <div className="flex justify-end gap-2 border-t border-brand-lilac/70 bg-brand-mist/40 px-5 py-3">
+          <button type="button" onClick={onClose} className="rounded-full border border-brand-lilac bg-white px-4 py-2 text-xs font-semibold text-brand-ink/70 hover:border-brand-magenta/40">
+            Cancel
+          </button>
+          <button type="submit" className="rounded-full bg-gradient-to-r from-brand-magenta to-brand-purple px-5 py-2 text-xs font-semibold text-white shadow-[0_4px_14px_-4px_rgba(227,28,121,0.5)] hover:-translate-y-0.5">
+            Save Changes
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   LEAD DETAIL DRAWER
+   ═══════════════════════════════════════════════════════════════ */
+function LeadDetailDrawer({ lead: l, onClose, onEdit, onStatusChange }) {
+  const meta = statusMeta(l.status);
+  useLockBodyScroll();
+
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  return (
+    <div role="dialog" aria-modal="true" aria-label="Lead details" className="fixed inset-0 z-50 flex justify-end overflow-hidden bg-black/40 backdrop-blur-sm">
+      <div className="h-full w-full max-w-2xl animate-slide-in-right overflow-y-auto overscroll-contain bg-white shadow-panel">
+        <div className="sticky top-0 z-10 flex items-center justify-between gap-3 border-b border-brand-lilac bg-gradient-to-r from-brand-mist/60 to-white px-6 py-4 backdrop-blur-sm">
+          <div className="flex items-center gap-3">
+            <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-brand-magenta to-brand-purple text-sm font-bold text-white shadow-sm">
+              {initials(l.name)}
+            </span>
+            <div>
+              <p className="font-mono text-[9px] uppercase tracking-[0.2em] text-brand-magenta">{l.id}</p>
+              <h3 className="font-display text-base font-bold text-brand-ink">{l.name}</h3>
+            </div>
+          </div>
+          <button type="button" onClick={onClose} className="rounded-lg p-2 text-brand-ink/50 hover:bg-brand-lilac" aria-label="Close">
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="space-y-5 p-6">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-bold ring-1 ${TONES[meta.tone]}`}>
+              {meta.label}
+            </span>
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-brand-lilac/60 px-3 py-1.5 text-xs font-bold text-brand-purple">
+              <Globe size={12} /> {leadSource(l)}
+            </span>
+            {leadCampaign(l) && (
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-brand-mist px-3 py-1.5 text-xs font-bold text-brand-ink/70">
+                <Megaphone size={12} /> {leadCampaign(l)}
+              </span>
+            )}
+          </div>
+
+          <div className="relative overflow-hidden rounded-2xl border border-brand-lilac bg-gradient-to-br from-brand-mist/60 to-white p-5">
+            <span className="pointer-events-none absolute -right-16 -top-16 h-40 w-40 rounded-full bg-brand-magenta/10 blur-3xl" />
+            <div className="relative flex items-start gap-4">
+              <span className="flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-brand-magenta to-brand-purple text-xl font-bold text-white shadow-md">
+                {initials(l.name)}
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="font-display text-lg font-bold text-brand-ink">{l.name}</p>
+                <p className="font-mono text-[11px] text-brand-ink/50">{l.id}</p>
+                <div className="mt-2 flex flex-wrap gap-3 text-xs text-brand-ink/70">
+                  {leadPhone(l) && (
+                    <span className="inline-flex items-center gap-1.5">
+                      <Phone size={11} className="text-brand-magenta" /> {leadPhone(l)}
+                    </span>
+                  )}
+                  {leadEmail(l) && (
+                    <span className="inline-flex items-center gap-1.5">
+                      <Mail size={11} className="text-brand-magenta" /> {leadEmail(l)}
+                    </span>
+                  )}
+                  {l.city && (
+                    <span className="inline-flex items-center gap-1.5">
+                      <MapPin size={11} className="text-brand-magenta" /> {l.city}
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="card !p-5 space-y-3">
+            <div className="flex items-center gap-2 border-b border-brand-lilac/60 pb-1.5">
+              <span className="flex h-6 w-6 items-center justify-center rounded-lg bg-gradient-to-br from-brand-magenta/10 to-brand-purple/10 text-brand-magenta">
+                <Briefcase size={12} />
+              </span>
+              <h4 className="font-mono text-[10px] font-bold uppercase tracking-wider text-brand-ink/60">Lead Information</h4>
+            </div>
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+              <InfoRow icon={Globe}     label="Source"      value={leadSource(l)} />
+              <InfoRow icon={Megaphone} label="Campaign"    value={leadCampaign(l) || '—'} />
+              <InfoRow icon={Briefcase} label="Project"     value={l.project || '—'} />
+              <InfoRow icon={UserPlus}  label="Assigned To" value={isAssigned(l) ? l.assignedAgent : 'Unassigned'} />
+              <InfoRow icon={Calendar}  label="Captured"    value={formatDate(leadDate(l))} />
+              <InfoRow icon={Sparkles}  label="Status"      value={meta.label} />
+            </div>
+          </div>
+
+          {l.notes && (
+            <div className="card !p-5">
+              <div className="flex items-center gap-2 border-b border-brand-lilac/60 pb-1.5">
+                <span className="flex h-6 w-6 items-center justify-center rounded-lg bg-gradient-to-br from-brand-magenta/10 to-brand-purple/10 text-brand-magenta">
+                  <MessageSquare size={12} />
+                </span>
+                <h4 className="font-mono text-[10px] font-bold uppercase tracking-wider text-brand-ink/60">Notes</h4>
+              </div>
+              <p className="mt-3 whitespace-pre-line rounded-xl border border-brand-lilac/60 bg-brand-mist/40 p-3 text-sm text-brand-ink/80">
+                {l.notes}
+              </p>
+            </div>
+          )}
+
+          <div className="card !p-5">
+            <div className="flex items-center gap-2 border-b border-brand-lilac/60 pb-1.5">
+              <span className="flex h-6 w-6 items-center justify-center rounded-lg bg-gradient-to-br from-brand-magenta/10 to-brand-purple/10 text-brand-magenta">
+                <Activity size={12} />
+              </span>
+              <h4 className="font-mono text-[10px] font-bold uppercase tracking-wider text-brand-ink/60">Change Status</h4>
+            </div>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {STATUS_OPTIONS.map((s) => {
+                const active = sameStatus(l.status, s.value);
+                return (
+                  <button
+                    key={s.value}
+                    type="button"
+                    onClick={() => { if (!active) onStatusChange(s.value); }}
+                    disabled={active}
+                    className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold transition-all ${
+                      active
+                        ? `${TONES[s.tone]} cursor-default ring-2 ring-brand-magenta/20`
+                        : 'border-brand-lilac bg-white text-brand-ink/60 hover:bg-brand-lilac/30'
+                    }`}
+                  >
+                    {s.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            <button type="button" onClick={onEdit} className="flex items-center justify-center gap-1.5 rounded-xl bg-gradient-to-r from-brand-magenta to-brand-purple py-2.5 text-xs font-semibold text-white shadow-card hover:brightness-110">
+              <Pencil size={13} /> Edit Lead
+            </button>
+            <button type="button" onClick={onClose} className="flex items-center justify-center gap-1.5 rounded-xl border border-brand-lilac bg-white py-2.5 text-xs font-semibold text-brand-ink hover:bg-brand-lilac/40">
+              Close
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function InfoRow({ icon: Icon, label, value }) {
+  return (
+    <div className="flex items-center gap-3 text-sm">
+      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-brand-lilac/50 text-brand-magenta">
+        <Icon size={14} />
+      </span>
+      <div className="flex min-w-0 flex-1 items-center justify-between gap-3">
+        <span className="shrink-0 text-brand-ink/50">{label}</span>
+        <span className="truncate font-semibold text-brand-ink">{value}</span>
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   CONFIRM DIALOG
+   ═══════════════════════════════════════════════════════════════ */
+function ConfirmDialog({ title, message, confirmLabel, onCancel, onConfirm }) {
+  useLockBodyScroll();
+
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onCancel(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onCancel]);
+
+  return (
+    <div role="dialog" aria-modal="true" aria-label={title} className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm">
+      <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-panel">
+        <div className="mb-4 flex items-center gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-rose-100 text-rose-500">
+            <AlertCircle size={18} />
+          </div>
+          <h3 className="font-display text-base font-semibold text-brand-ink">{title}</h3>
+        </div>
+        <p className="mb-5 text-sm text-brand-ink/60">{message}</p>
+        <div className="flex gap-2">
+          <button type="button" onClick={onCancel} className="flex-1 rounded-xl border border-brand-lilac py-2.5 text-sm font-semibold text-brand-ink hover:bg-brand-lilac/40">
+            Cancel
+          </button>
+          <button type="button" onClick={onConfirm} className="flex-1 rounded-xl bg-rose-500 py-2.5 text-sm font-semibold text-white hover:bg-rose-600">
+            {confirmLabel}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
